@@ -1,12 +1,12 @@
 use std::{
-    env, fmt,
+    env,
+    fmt,
     fs::File,
-    io::{self, BufReader, BufWriter, Read, Write},
+    io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf, StripPrefixError},
 };
 
-use crc32fast::Hasher;
-use flate2::{Compression, write::GzEncoder};
+use flate2::{Compression, write::GzEncoder, Crc};
 use walkdir::WalkDir;
 
 const SIGNATURE: &[u8] = b".slf";
@@ -40,19 +40,18 @@ type Result<T> = std::result::Result<T, ArchiveError>;
 
 struct HasherWriter<W: Write> {
     writer: W,
-    hasher: Hasher,
+    hasher: Crc,
 }
 
 impl<W: Write> HasherWriter<W> {
-    fn new(writer: W, hasher: Hasher) -> Self {
+    fn new(writer: W, hasher: Crc) -> Self {
         Self { writer, hasher }
     }
 
-    fn finalize(self) -> u32 {
-        self.hasher.finalize()
+    fn sum(self) -> u32 {
+        self.hasher.sum()
     }
 }
-
 impl<W: Write> Write for HasherWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.hasher.update(buf);
@@ -114,7 +113,19 @@ fn pack(root: &Path) -> Result<()> {
     writer.write_all(&(files.len() as u32).to_le_bytes())?;
 
     let mut metadata = Vec::new();
-    let mut data_offset: u64 = 4 + 4;
+
+    /*  .slf File structure:
+        Signture (4 bytes = '.slf'),
+        count of files (4 bytes),
+        lenght of file name(4 bytes),
+        name ('lenght' bytes),
+        original size of file (8 bytes),
+        compressed size (8 bytes),
+        data offset (8 bytes),
+        compressed file ('compressed size' bytes),
+        original checksum (4 bytes),
+        compressed checksum (4 bytes),
+    */
 
     for path in &files {
         let relative_name = if root.is_file() {
@@ -129,27 +140,33 @@ fn pack(root: &Path) -> Result<()> {
         let name_len = name_str.len() as u32;
         let file_size = path.metadata()?.len();
 
-        data_offset += (4 + name_len + 8 + 8) as u64;
         metadata.push((name_len, name_str, file_size));
     }
+
+    let mut temp_offsets = Vec::new();
 
     for (len, name, size) in metadata {
         writer.write_all(&len.to_le_bytes())?;
         writer.write_all(name.as_bytes())?;
         writer.write_all(&size.to_le_bytes())?;
-        writer.write_all(&data_offset.to_le_bytes())?;
-        data_offset += size;
+        temp_offsets.push(writer.stream_position()?);
+        writer.write_all(&[0u8; 8])?; // temp compressed size
+        writer.write_all(&[0u8; 8])?; // temp offset
     }
+
+    let mut data_offsets = Vec::new();
 
     for path in files {
         let file = File::open(&path)?;
         let mut reader = BufReader::new(file);
         let mut buffer = [0u8; BUFFER_SIZE];
 
-        let mut original_checksum = crc32fast::Hasher::new();
+        let mut original_checksum = Crc::new();
 
-        let hasher = crc32fast::Hasher::new();
+        let hasher = Crc::new();
         let mut hasher_writer = HasherWriter::new(&mut writer, hasher);
+
+        data_offsets.push(hasher_writer.writer.stream_position()?);
 
         let mut encoder = GzEncoder::new(&mut hasher_writer, Compression::default());
 
@@ -169,12 +186,23 @@ fn pack(root: &Path) -> Result<()> {
 
         encoder.finish()?;
 
-        let original_checksum = original_checksum.finalize();
-        let compressed_checksum = hasher_writer.finalize();
+        let original_checksum = original_checksum.sum();
+        let compressed_checksum = hasher_writer.sum();
 
         writer.write_all(&original_checksum.to_le_bytes())?;
         writer.write_all(&compressed_checksum.to_le_bytes())?;
+
+        writer.flush()?;
     }
+
+    for (i, &position) in temp_offsets.iter().enumerate() {
+        writer.seek(SeekFrom::Start(position))?;
+        let offset = data_offsets[i];
+        writer.write_all(&(offset - position).to_le_bytes())?;
+        writer.write_all(&data_offsets[i].to_le_bytes())?;
+    }
+
+    writer.seek(SeekFrom::End(0))?;
 
     writer.flush()?;
     Ok(())
