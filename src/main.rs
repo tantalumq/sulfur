@@ -1,12 +1,30 @@
+// TODO: File structure
+// TODO: TryInto Error
+// TODO: Use OsStr|OsString
+
+// .slf File structure:
+// Signture (4 bytes = '.slf'),
+// count of files (4 bytes),
+// lenght of file name(4 bytes),
+// name ('lenght' bytes),
+// original size of file (8 bytes),
+// compressed size (8 bytes),
+// data offset (8 bytes),
+// compressed file ('compressed size' bytes),
+// original checksum (4 bytes),
+// compressed checksum (4 bytes),
+
 use std::{
-    env,
-    fmt,
+    env, fmt,
     fs::File,
     io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf, StripPrefixError},
 };
 
-use flate2::{Compression, write::GzEncoder, Crc};
+use flate2::{
+    Compression, Crc,
+    write::{GzDecoder, GzEncoder},
+};
 use walkdir::WalkDir;
 
 const SIGNATURE: &[u8] = b".slf";
@@ -16,23 +34,25 @@ const BUFFER_SIZE: usize = 64 * 1024;
 enum ArchiveError {
     Io(String),
     Path(String),
+    Cast(String),
 }
 impl fmt::Display for ArchiveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(c) => write!(f, "[ERROR] {}", c),
-            Self::Path(c) => write!(f, "[ERROR] {}", c),
+            Self::Io(c) => write!(f, "{}", c),
+            Self::Path(c) => write!(f, "{}", c),
+            Self::Cast(c) => write!(f, "{}", c),
         }
     }
 }
 impl From<io::Error> for ArchiveError {
     fn from(value: io::Error) -> Self {
-        ArchiveError::Io(value.to_string())
+        Self::Io(value.to_string())
     }
 }
 impl From<StripPrefixError> for ArchiveError {
     fn from(value: StripPrefixError) -> Self {
-        ArchiveError::Path(value.to_string())
+        Self::Path(value.to_string())
     }
 }
 
@@ -57,8 +77,80 @@ impl<W: Write> Write for HasherWriter<W> {
         self.hasher.update(buf);
         self.writer.write(buf)
     }
+
     fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
+    }
+}
+
+struct InnerFile {
+    name: String,
+    original_size: u64,
+    compressed_size: u64,
+    offset: u64,
+    original_checksum: u32,
+    compressed_checksum: u32,
+}
+
+impl InnerFile {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            ..Default::default()
+        }
+    }
+
+    fn create(name: String, original_size: u64, compressed_size: u64, offset: u64) -> Self {
+        Self {
+            name,
+            original_size,
+            compressed_size,
+            offset,
+            ..Default::default()
+        }
+    }
+
+    fn write_metadata<W: Write + ?Sized + Seek>(&self, writer: &mut BufWriter<W>) -> Result<u64> {
+        writer.write_all(&(self.name.len() as u32).to_le_bytes())?;
+        writer.write_all(&self.name.as_bytes())?;
+        writer.write_all(&self.original_size.to_le_bytes())?;
+        let position = writer.stream_position()?;
+        writer.write_all(&self.compressed_size.to_le_bytes())?;
+        writer.write_all(&self.offset.to_le_bytes())?;
+        Ok(position)
+    }
+
+    fn set_original_size(&mut self, size: u64) {
+        self.original_size = size
+    }
+
+    fn set_compressed_size(&mut self, size: u64) {
+        self.compressed_size = size
+    }
+
+    fn set_offset(&mut self, offset: u64) {
+        self.offset = offset
+    }
+
+    fn set_original_checksum(&mut self, checksum: u32) {
+        self.original_checksum = checksum
+    }
+
+    fn compressed_checksum(&mut self, checksum: u32) {
+        self.compressed_checksum = checksum
+    }
+}
+
+impl Default for InnerFile {
+    fn default() -> Self {
+        Self {
+            name: String::default(),
+            original_size: u64::default(),
+            compressed_size: u64::default(),
+            offset: u64::default(),
+            original_checksum: u32::default(),
+            compressed_checksum: u32::default(),
+        }
     }
 }
 
@@ -69,27 +161,38 @@ fn main() {
         return;
     }
 
-    match args[1].as_str() {
-        "pack" => {
-            if let Err(e) = pack(Path::new(&args[2])) {
-                eprintln!("{}", e)
-            }
-        }
-        "unpack" => todo!(),
+    let result = match args[1].as_str() {
+        "pack" => pack(Path::new(&args[2])),
+        "unpack" => unpack(&Path::new(&args[2])),
         _ => todo!(),
+    };
+
+    if let Err(e) = result {
+        eprintln!("[ERROR] {}", e)
     }
 }
 
 fn pack(root: &Path) -> Result<()> {
+    let str_path = root
+        .to_str()
+        .ok_or(ArchiveError::Path(format!("Can't read path")))?;
+
+    if !root.exists() {
+        return Err(ArchiveError::Path(format!(
+            "File or directory doesn't exist at this path: {}",
+            str_path
+        )));
+    }
+
     let archive_name = if root.is_file() {
         root.file_stem().ok_or(ArchiveError::Path(format!(
             "Failed to get file stem from path: {}",
-            root.to_string_lossy()
+            str_path
         )))?
     } else {
         root.file_name().ok_or(ArchiveError::Path(format!(
             "Failed to get directory name from path: {}",
-            root.to_string_lossy()
+            str_path
         )))?
     };
 
@@ -112,46 +215,29 @@ fn pack(root: &Path) -> Result<()> {
 
     writer.write_all(&(files.len() as u32).to_le_bytes())?;
 
-    let mut metadata = Vec::new();
-
-    /*  .slf File structure:
-        Signture (4 bytes = '.slf'),
-        count of files (4 bytes),
-        lenght of file name(4 bytes),
-        name ('lenght' bytes),
-        original size of file (8 bytes),
-        compressed size (8 bytes),
-        data offset (8 bytes),
-        compressed file ('compressed size' bytes),
-        original checksum (4 bytes),
-        compressed checksum (4 bytes),
-    */
+    let mut inners = Vec::new();
 
     for path in &files {
         let relative_name = if root.is_file() {
             Path::new(path.file_name().ok_or(ArchiveError::Path(format!(
                 "Failed to get file name from path: {}",
-                path.to_string_lossy()
+                str_path
             )))?)
         } else {
             path.strip_prefix(root)?
         };
-        let name_str = relative_name.to_string_lossy().to_string();
-        let name_len = name_str.len() as u32;
+        let file_name = relative_name.to_string_lossy().to_string();
         let file_size = path.metadata()?.len();
 
-        metadata.push((name_len, name_str, file_size));
+        let inner_file = InnerFile::create(file_name, file_size, 0, 0);
+
+        inners.push(inner_file);
     }
 
     let mut temp_offsets = Vec::new();
 
-    for (len, name, size) in metadata {
-        writer.write_all(&len.to_le_bytes())?;
-        writer.write_all(name.as_bytes())?;
-        writer.write_all(&size.to_le_bytes())?;
-        temp_offsets.push(writer.stream_position()?);
-        writer.write_all(&[0u8; 8])?; // temp compressed size
-        writer.write_all(&[0u8; 8])?; // temp offset
+    for inner in inners {
+        temp_offsets.push(inner.write_metadata(&mut writer)?);
     }
 
     let mut data_offsets = Vec::new();
@@ -177,7 +263,7 @@ fn pack(root: &Path) -> Result<()> {
                 break; //EOF
             }
 
-            let original_chunk = &buffer[0..bytes];
+            let original_chunk = &buffer[..bytes];
 
             original_checksum.update(&original_chunk);
 
@@ -205,5 +291,64 @@ fn pack(root: &Path) -> Result<()> {
     writer.seek(SeekFrom::End(0))?;
 
     writer.flush()?;
+    Ok(())
+}
+
+fn unpack(archive: &Path) -> Result<()> {
+    let str_path = archive
+        .to_str()
+        .ok_or(ArchiveError::Path(format!("Can't read path")))?;
+
+    if !archive.exists() {
+        return Err(ArchiveError::Path(format!(
+            "Archive doesn't exists at this path: {}",
+            str_path
+        )));
+    }
+
+    archive.extension().ok_or(ArchiveError::Path(format!(
+        "Incorrect file type at path: {}",
+        str_path
+    )))?;
+
+    let file = File::open(archive)?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = [0u8; BUFFER_SIZE];
+
+    let mut bytes = reader.read(&mut buffer[..4])?;
+
+    if bytes != 4 && buffer != SIGNATURE {
+        return Err(ArchiveError::Path(format!(
+            "File is corrupted or have incorrect type. File at path: {}",
+            str_path
+        )));
+    }
+
+    bytes = reader.read(&mut buffer)?;
+
+    let file_count = if bytes == 4 {
+        u32::from_le_bytes(buffer[..4].try_into().unwrap())
+    } else {
+        0
+    };
+
+    for i in 0..file_count {
+        bytes = reader.read(&mut buffer)?;
+
+        let name_len = if bytes == 4 {
+            u32::from_le_bytes(buffer[..4].try_into().unwrap())
+        } else {
+            0
+        };
+
+        bytes = reader.read(&mut buffer[..(name_len as usize)])?;
+
+        let name = if bytes == name_len as usize {
+            str::from_utf8(&buffer[..bytes]).unwrap()
+        } else {
+            ""
+        };
+    }
+
     Ok(())
 }
