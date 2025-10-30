@@ -1,12 +1,13 @@
 // TODO: File structure
 // TODO: TryInto Error
 // TODO: Use OsStr|OsString
+// TODO: Add windows support
 
 // .slf File structure:
-// Signture (4 bytes = '.slf'),
+// Signature (4 bytes = '.slf'),
 // count of files (4 bytes),
-// lenght of file name(4 bytes),
-// name ('lenght' bytes),
+// length of file name(4 bytes),
+// name ('length' bytes),
 // original size of file (8 bytes),
 // compressed size (8 bytes),
 // data offset (8 bytes),
@@ -15,9 +16,12 @@
 // compressed checksum (4 bytes),
 
 use std::{
-    env, fmt,
-    fs::File,
+    env,
+    ffi::OsString,
+    fmt,
+    fs::{File, create_dir},
     io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    os::unix::ffi::OsStringExt,
     path::{Path, PathBuf, StripPrefixError},
 };
 
@@ -136,7 +140,7 @@ impl InnerFile {
         self.original_checksum = checksum
     }
 
-    fn compressed_checksum(&mut self, checksum: u32) {
+    fn set_compressed_checksum(&mut self, checksum: u32) {
         self.compressed_checksum = checksum
     }
 }
@@ -263,11 +267,11 @@ fn pack(root: &Path) -> Result<()> {
                 break; //EOF
             }
 
-            let original_chunk = &buffer[..bytes];
+            let chunk = &buffer[..bytes];
 
-            original_checksum.update(&original_chunk);
+            original_checksum.update(&chunk);
 
-            encoder.write_all(original_chunk)?;
+            encoder.write_all(chunk)?;
         }
 
         encoder.finish()?;
@@ -329,25 +333,122 @@ fn unpack(archive: &Path) -> Result<()> {
     let file_count = if bytes == 4 {
         u32::from_le_bytes(buffer[..4].try_into().unwrap())
     } else {
-        0
+        todo!("No files")
     };
 
+    let dir_pathbuf = archive.with_extension("");
+    let dir_path = dir_pathbuf.as_path();
+
+    if file_count > 1 {
+        create_dir(dir_path)?;
+    }
+
     for i in 0..file_count {
-        bytes = reader.read(&mut buffer)?;
+        bytes = reader.read(&mut buffer[..4])?;
 
         let name_len = if bytes == 4 {
             u32::from_le_bytes(buffer[..4].try_into().unwrap())
         } else {
-            0
+            todo!("No file name")
         };
 
         bytes = reader.read(&mut buffer[..(name_len as usize)])?;
 
         let name = if bytes == name_len as usize {
-            str::from_utf8(&buffer[..bytes]).unwrap()
+            OsString::from_vec(buffer[..bytes].to_vec())
         } else {
-            ""
+            todo!("Empty file name")
         };
+
+        bytes = reader.read(&mut buffer[..8])?;
+
+        let original_size = if bytes == 8 {
+            u64::from_le_bytes(buffer[..8].try_into().unwrap())
+        } else {
+            todo!("Empty files")
+        };
+
+        bytes = reader.read(&mut buffer[..8])?;
+
+        let compressed_size = if bytes == 8 {
+            u64::from_le_bytes(buffer[..8].try_into().unwrap())
+        } else {
+            todo!("Empty files")
+        };
+
+        bytes = reader.read(&mut buffer[..8])?;
+
+        let offset = if bytes == 8 {
+            u64::from_le_bytes(buffer[..8].try_into().unwrap())
+        } else {
+            todo!("No offset")
+        };
+
+        let file_path = dir_path.join(name);
+        let file = File::create(file_path)?;
+
+        let mut writer = BufWriter::new(file);
+
+        let position = reader.stream_position()?;
+        reader.seek(SeekFrom::Start(offset))?;
+
+        let mut compressed_checksum = Crc::new();
+
+        let hasher = Crc::new();
+        let mut hasher_writer = HasherWriter::new(&mut writer, hasher);
+
+        let mut decoder = GzDecoder::new(&mut hasher_writer);
+
+        let mut remaining_bytes = compressed_size;
+
+        loop {
+            let to_read = remaining_bytes.min(BUFFER_SIZE as u64) as usize;
+
+            reader.read(&mut buffer[..to_read])?;
+
+            if bytes == 0 {
+                break;
+            }
+
+            let chunk = &buffer[..bytes];
+
+            compressed_checksum.update(chunk);
+
+            decoder.write_all(chunk)?;
+
+            remaining_bytes -= bytes as u64;
+        }
+
+        decoder.finish()?;
+
+        let original_checksum = hasher_writer.sum();
+        let compressed_checksum = compressed_checksum.sum();
+
+        reader.seek(SeekFrom::Start(position))?;
+
+        bytes = reader.read(&mut buffer[..4])?;
+
+        let original_checksum_readed = if bytes == 4 {
+            u32::from_le_bytes(buffer[..4].try_into().unwrap())
+        } else {
+            todo!("No file name")
+        };
+
+        bytes = reader.read(&mut buffer[..4])?;
+
+        let compressed_checksum_readed = if bytes == 4 {
+            u32::from_le_bytes(buffer[..4].try_into().unwrap())
+        } else {
+            todo!("No file name")
+        };
+
+        if original_checksum != original_checksum_readed {
+            todo!("original cheksums aren't equal")
+        }
+
+        if compressed_checksum != compressed_checksum_readed {
+            todo!("compressed cheksums aren't equal")
+        }
     }
 
     Ok(())
