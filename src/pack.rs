@@ -105,22 +105,20 @@ fn inner_files(root: &Path, paths: &Vec<PathBuf>) -> Result<Vec<InnerFile>> {
     Ok(inners)
 }
 
-fn process_files<W: Write + Seek>(
+fn process_files(
     paths: Vec<PathBuf>,
-    writer: &mut W,
+    writer: &mut BufWriter<File>,
 ) -> Result<(Vec<u64>, Vec<u64>, Vec<(u32, u32)>)> {
     let mut data_offsets = Vec::new();
     let mut compressed_sizes = Vec::new();
     let mut checksums = Vec::new();
-
-    let mut buffer = [0u8; BUFFER_SIZE];
 
     for path in paths {
         let hasher = Crc::new();
         let hasher_writer = HasherWriter::new(writer, hasher);
 
         let (offset, size, (original_cheksum, compressed_checksum)) =
-            process_single_file(path, hasher_writer, &mut buffer)?;
+            process_single_file(path, hasher_writer)?;
 
         data_offsets.push(offset);
         compressed_sizes.push(size);
@@ -130,13 +128,14 @@ fn process_files<W: Write + Seek>(
     Ok((data_offsets, compressed_sizes, checksums))
 }
 
-fn process_single_file<W: Write + Seek>(
+fn process_single_file(
     path: PathBuf,
-    mut hasher_writer: HasherWriter<W>,
-    mut buffer: &mut [u8],
+    mut hasher_writer: HasherWriter,
 ) -> Result<(u64, u64, (u32, u32))> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
+
+    let mut buffer = [0u8; BUFFER_SIZE];
 
     let mut original_checksum = Crc::new();
     let offset = hasher_writer.stream_position()?;
@@ -146,7 +145,7 @@ fn process_single_file<W: Write + Seek>(
     hasher_writer =
         compress_file_content(&mut reader, encoder, &mut original_checksum, &mut buffer)?;
 
-    let size = hasher_writer.written_bytes();
+    let size = hasher_writer.take_written_bytes();
 
     let original_checksum = original_checksum.sum();
     let compressed_checksum = hasher_writer.sum();

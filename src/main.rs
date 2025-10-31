@@ -7,6 +7,7 @@ TODO: Try macros for boiler-plate code
 TODO: Versions
 TODO: --help
 TODO: User file unpack destination
+TODO: File type sensivity
 
 .slf File structure:
 Signature (4 bytes = '.slf'),
@@ -27,6 +28,7 @@ pub mod unpack;
 use std::{
     env,
     ffi::OsString,
+    fs::File,
     io::{self, BufWriter, Read, Seek, Write},
     os::unix::ffi::{OsStrExt, OsStringExt},
     path::Path,
@@ -60,14 +62,14 @@ fn main() {
     }
 }
 
-pub struct HasherWriter<'a, W: Write> {
-    writer: &'a mut W,
+pub struct HasherWriter<'a> {
+    writer: &'a mut BufWriter<File>,
     hasher: Crc,
     bytes: u64,
 }
 
-impl<'a, W: Write + Seek> HasherWriter<'a, W> {
-    pub fn new(writer: &'a mut W, hasher: Crc) -> Self {
+impl<'a> HasherWriter<'a> {
+    pub fn new(writer: &'a mut BufWriter<File>, hasher: Crc) -> Self {
         Self {
             writer,
             hasher,
@@ -84,13 +86,13 @@ impl<'a, W: Write + Seek> HasherWriter<'a, W> {
         Ok(pos)
     }
 
-    pub fn written_bytes(&mut self) -> u64 {
+    pub fn take_written_bytes(&mut self) -> u64 {
         let old = self.bytes;
         self.bytes = 0;
         old
     }
 }
-impl<'a, W: Write> Write for HasherWriter<'a, W> {
+impl<'a> Write for HasherWriter<'a> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.hasher.update(buf);
         let bytes = self.writer.write(buf)?;
@@ -145,6 +147,10 @@ impl InnerFile {
         } else {
             todo!("No file name")
         };
+
+        if name_len > BUFFER_SIZE as u32 {
+            todo!("Wow")
+        }
 
         bytes = reader.read(&mut buffer[..(name_len as usize)])?;
 

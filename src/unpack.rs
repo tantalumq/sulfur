@@ -113,7 +113,7 @@ pub fn unpack(archive: &Path) -> Result<()> {
             todo!("compressed cheksums aren't equal")
         }
 
-        if inner_file.original_size != hasher_writer.written_bytes() {
+        if inner_file.original_size != hasher_writer.take_written_bytes() {
             todo!("original file size and unpacked file size aren't equal")
         }
     }
