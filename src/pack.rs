@@ -50,17 +50,17 @@ pub fn pack(root: &Path) -> Result<()> {
 }
 
 fn archive_path(root: &Path) -> Result<OsString> {
-    let os_path = validate_path(root)?;
+    validate_path(root)?;
 
     let archive_name = if root.is_file() {
         root.file_stem().ok_or(ArchiveError::Path(format!(
             "Failed to get file stem from path: {}",
-            os_path.display()
+            root.display()
         )))?
     } else {
         root.file_name().ok_or(ArchiveError::Path(format!(
             "Failed to get directory name from path: {}",
-            os_path.display()
+            root.display()
         )))?
     };
 

@@ -32,22 +32,16 @@ pub fn unpack(archive: &Path) -> Result<()> {
     let mut reader = BufReader::new(file);
     let mut buffer = [0u8; BUFFER_SIZE];
 
-    let mut bytes = reader.read(&mut buffer[..4])?;
-
-    if bytes != 4 && buffer != SIGNATURE {
+    reader.read_exact(&mut buffer[..4])?;
+    if &buffer[..4] != SIGNATURE {
         return Err(ArchiveError::Path(format!(
             "File is corrupted or have incorrect type. File at path: {}",
             str_path
         )));
     }
 
-    bytes = reader.read(&mut buffer[..4])?;
-
-    let file_count = if bytes == 4 {
-        u32::from_le_bytes(buffer[..4].try_into().unwrap())
-    } else {
-        todo!("No files")
-    };
+    reader.read_exact(&mut buffer[..4])?;
+    let file_count = u32::from_le_bytes(buffer[..4].try_into()?);
 
     let dir_pathbuf = archive.with_extension("");
     let dir_path = dir_pathbuf.as_path();
@@ -83,7 +77,7 @@ pub fn unpack(archive: &Path) -> Result<()> {
         loop {
             let to_read = remaining_bytes.min(BUFFER_SIZE as u64) as usize;
 
-            bytes = reader.read(&mut buffer[..to_read])?;
+            let bytes = reader.read(&mut buffer[..to_read])?;
 
             if bytes == 0 {
                 break;

@@ -8,6 +8,8 @@ TODO: Versions
 TODO: --help
 TODO: User file unpack destination
 TODO: File type sensivity
+TODO: Add thiserror
+TODO: 'as' to '::try_into()'
 
 .slf File structure:
 Signature (4 bytes = '.slf'),
@@ -140,65 +142,34 @@ impl InnerFile {
     }
 
     pub fn from_archive<R: Read + Seek>(reader: &mut R, buffer: &mut [u8]) -> Result<Self> {
-        let mut bytes = reader.read(&mut buffer[..4])?;
+        reader.read_exact(&mut buffer[..4])?;
+        let name_len = u32::from_le_bytes(buffer[..4].try_into()?) as usize;
 
-        let name_len = if bytes == 4 {
-            u32::from_le_bytes(buffer[..4].try_into().unwrap())
-        } else {
-            todo!("No file name")
-        };
-
-        if name_len > BUFFER_SIZE as u32 {
-            todo!("Wow")
+        if name_len == 0 {
+            return Err(ArchiveError::EmptyFilename);
         }
 
-        bytes = reader.read(&mut buffer[..(name_len as usize)])?;
+        if name_len as usize > BUFFER_SIZE {
+            return Err(ArchiveError::BufferOverflow(name_len as usize));
+        }
 
-        let name = if bytes == name_len as usize {
-            OsString::from_vec(buffer[..bytes].to_vec())
-        } else {
-            todo!("Empty file name")
-        };
+        reader.read_exact(&mut buffer[..(name_len as usize)])?;
+        let name = OsString::from_vec(buffer[..(name_len as usize)].to_vec());
 
-        bytes = reader.read(&mut buffer[..8])?;
+        reader.read_exact(&mut buffer[..8])?;
+        let original_size = u64::from_le_bytes(buffer[..8].try_into()?);
 
-        let original_size = if bytes == 8 {
-            u64::from_le_bytes(buffer[..8].try_into().unwrap())
-        } else {
-            todo!("Empty files")
-        };
+        reader.read_exact(&mut buffer[..8])?;
+        let compressed_size = u64::from_le_bytes(buffer[..8].try_into()?);
 
-        bytes = reader.read(&mut buffer[..8])?;
+        reader.read_exact(&mut buffer[..8])?;
+        let offset = u64::from_le_bytes(buffer[..8].try_into()?);
 
-        let compressed_size = if bytes == 8 {
-            u64::from_le_bytes(buffer[..8].try_into().unwrap())
-        } else {
-            todo!("Empty files")
-        };
+        reader.read_exact(&mut buffer[..4])?;
+        let original_checksum = u32::from_le_bytes(buffer[..4].try_into()?);
 
-        bytes = reader.read(&mut buffer[..8])?;
-
-        let offset = if bytes == 8 {
-            u64::from_le_bytes(buffer[..8].try_into().unwrap())
-        } else {
-            todo!("No offset")
-        };
-
-        bytes = reader.read(&mut buffer[..4])?;
-
-        let original_checksum = if bytes == 4 {
-            u32::from_le_bytes(buffer[..4].try_into().unwrap())
-        } else {
-            todo!("No original checksum")
-        };
-
-        bytes = reader.read(&mut buffer[..4])?;
-
-        let compressed_checksum = if bytes == 4 {
-            u32::from_le_bytes(buffer[..4].try_into().unwrap())
-        } else {
-            todo!("No compressed checksum")
-        };
+        reader.read_exact(&mut buffer[..4])?;
+        let compressed_checksum = u32::from_le_bytes(buffer[..4].try_into()?);
 
         Ok(InnerFile::create(
             name,
@@ -259,14 +230,12 @@ impl Default for InnerFile {
     }
 }
 
-fn validate_path(path: &Path) -> Result<OsString> {
-    let os_path = path.as_os_str().to_ascii_lowercase();
-
+fn validate_path(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(ArchiveError::Path(format!(
             "File or directory doesn't exist at this path: {}",
-            os_path.display()
+            path.display()
         )));
     };
-    Ok(os_path)
+    Ok(())
 }
