@@ -1,19 +1,25 @@
-// TODO: File structure
-// TODO: TryInto Error
-// TODO: Use OsStr|OsString
-// TODO: Add windows support
+/*
+TODO: File structure
+TODO: TryInto Error
+TODO: Use OsStr|OsString
+TODO: Add windows support
+TODO: Try macros for boiler-plate code
+TODO: Versions
+*/
 
-// .slf File structure:
-// Signature (4 bytes = '.slf'),
-// count of files (4 bytes),
-// length of file name(4 bytes),
-// name ('length' bytes),
-// original size of file (8 bytes),
-// compressed size (8 bytes),
-// data offset (8 bytes),
-// compressed file ('compressed size' bytes),
-// original checksum (4 bytes),
-// compressed checksum (4 bytes),
+/*
+.slf File structure:
+Signature (4 bytes = '.slf'),
+count of files (4 bytes),
+length of file name(4 bytes),
+name ('length' bytes),
+original size of file (8 bytes),
+compressed size (8 bytes),
+data offset (8 bytes),
+compressed file ('compressed size' bytes),
+original checksum (4 bytes),
+compressed checksum (4 bytes),
+*/
 
 use std::{
     env,
@@ -65,21 +71,39 @@ type Result<T> = std::result::Result<T, ArchiveError>;
 struct HasherWriter<W: Write> {
     writer: W,
     hasher: Crc,
+    bytes: u64,
 }
 
-impl<W: Write> HasherWriter<W> {
+impl<W: Write + Seek> HasherWriter<W> {
     fn new(writer: W, hasher: Crc) -> Self {
-        Self { writer, hasher }
+        Self {
+            writer,
+            hasher,
+            bytes: 0,
+        }
     }
 
-    fn sum(self) -> u32 {
+    fn sum(&self) -> u32 {
         self.hasher.sum()
+    }
+
+    fn stream_position(&mut self) -> Result<u64> {
+        let pos = self.writer.stream_position()?;
+        Ok(pos)
+    }
+
+    fn set_bytes(&mut self, bytes: usize) -> u64 {
+        let old = self.bytes;
+        self.bytes = bytes as u64;
+        old
     }
 }
 impl<W: Write> Write for HasherWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.hasher.update(buf);
-        self.writer.write(buf)
+        let bytes = self.writer.write(buf)?;
+        self.bytes += bytes as u64;
+        Ok(bytes)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -245,6 +269,7 @@ fn pack(root: &Path) -> Result<()> {
     }
 
     let mut data_offsets = Vec::new();
+    let mut compressed_sizes = Vec::new();
 
     for path in files {
         let file = File::open(&path)?;
@@ -256,7 +281,8 @@ fn pack(root: &Path) -> Result<()> {
         let hasher = Crc::new();
         let mut hasher_writer = HasherWriter::new(&mut writer, hasher);
 
-        data_offsets.push(hasher_writer.writer.stream_position()?);
+        let data_start = hasher_writer.stream_position()?;
+        data_offsets.push(data_start);
 
         let mut encoder = GzEncoder::new(&mut hasher_writer, Compression::default());
 
@@ -276,6 +302,9 @@ fn pack(root: &Path) -> Result<()> {
 
         encoder.finish()?;
 
+        let size = hasher_writer.set_bytes(0);
+        compressed_sizes.push(size);
+
         let original_checksum = original_checksum.sum();
         let compressed_checksum = hasher_writer.sum();
 
@@ -288,8 +317,9 @@ fn pack(root: &Path) -> Result<()> {
     for (i, &position) in temp_offsets.iter().enumerate() {
         writer.seek(SeekFrom::Start(position))?;
         let offset = data_offsets[i];
-        writer.write_all(&(offset - position).to_le_bytes())?;
-        writer.write_all(&data_offsets[i].to_le_bytes())?;
+        let size = compressed_sizes[i];
+        writer.write_all(&size.to_le_bytes())?;
+        writer.write_all(&offset.to_le_bytes())?;
     }
 
     writer.seek(SeekFrom::End(0))?;
@@ -328,7 +358,7 @@ fn unpack(archive: &Path) -> Result<()> {
         )));
     }
 
-    bytes = reader.read(&mut buffer)?;
+    bytes = reader.read(&mut buffer[..4])?;
 
     let file_count = if bytes == 4 {
         u32::from_le_bytes(buffer[..4].try_into().unwrap())
@@ -343,7 +373,7 @@ fn unpack(archive: &Path) -> Result<()> {
         create_dir(dir_path)?;
     }
 
-    for i in 0..file_count {
+    for _ in 0..file_count {
         bytes = reader.read(&mut buffer[..4])?;
 
         let name_len = if bytes == 4 {
@@ -384,7 +414,11 @@ fn unpack(archive: &Path) -> Result<()> {
             todo!("No offset")
         };
 
-        let file_path = dir_path.join(name);
+        let file_path = if file_count > 1 {
+            dir_path.join(name)
+        } else {
+            PathBuf::from(name)
+        };
         let file = File::create(file_path)?;
 
         let mut writer = BufWriter::new(file);
@@ -404,7 +438,7 @@ fn unpack(archive: &Path) -> Result<()> {
         loop {
             let to_read = remaining_bytes.min(BUFFER_SIZE as u64) as usize;
 
-            reader.read(&mut buffer[..to_read])?;
+            bytes = reader.read(&mut buffer[..to_read])?;
 
             if bytes == 0 {
                 break;
@@ -424,8 +458,6 @@ fn unpack(archive: &Path) -> Result<()> {
         let original_checksum = hasher_writer.sum();
         let compressed_checksum = compressed_checksum.sum();
 
-        reader.seek(SeekFrom::Start(position))?;
-
         bytes = reader.read(&mut buffer[..4])?;
 
         let original_checksum_readed = if bytes == 4 {
@@ -442,12 +474,18 @@ fn unpack(archive: &Path) -> Result<()> {
             todo!("No file name")
         };
 
+        reader.seek(SeekFrom::Start(position))?;
+
         if original_checksum != original_checksum_readed {
             todo!("original cheksums aren't equal")
         }
 
         if compressed_checksum != compressed_checksum_readed {
             todo!("compressed cheksums aren't equal")
+        }
+
+        if original_size != hasher_writer.set_bytes(0) {
+            todo!("original file size and unpacked file size aren't equal")
         }
     }
 
