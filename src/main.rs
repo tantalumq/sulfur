@@ -1,28 +1,20 @@
 /*
-TODO: File structure
-TODO: TryInto Error
-TODO: Use OsStr|OsString
-TODO: Add windows support
-TODO: Try macros for boiler-plate code
-TODO: Versions
-TODO: --help
-TODO: User file unpack destination
-TODO: File type sensivity
-TODO: Add thiserror
-TODO: 'as' to '::try_into()'
-
 .slf File structure:
 Signature (4 bytes = '.slf'),
+version (2 bytes),
 count of files (4 bytes),
-length of file name(4 bytes),
-name ('length' bytes),
-original size of file (8 bytes),
-compressed size (8 bytes),
-data offset (8 bytes),
-original checksum (4 bytes),
-compressed checksum (4 bytes),
-compressed file ('compressed size' bytes),
+index offset (8 bytes)
+ | length of file name(4 bytes),
+ | name ('length' bytes),
+ | original size of file (8 bytes),
+ | compressed size (8 bytes),
+ | original checksum (4 bytes),
+ | compressed checksum (4 bytes),
+ | compressed file ('compressed size' bytes),
+ ...
+Index array (8 bytes * File count).
 */
+
 pub mod error;
 pub mod pack;
 pub mod unpack;
@@ -32,16 +24,22 @@ use std::{
     ffi::OsString,
     fs::File,
     io::{self, BufWriter, Read, Seek, Write},
-    os::unix::ffi::{OsStrExt, OsStringExt},
-    path::Path,
+    path::{Component, PathBuf},
 };
+
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+
+#[cfg(windows)]
+use std::os::windows::ffi::OsStringExt;
 
 use flate2::Crc;
 
 use crate::error::{ArchiveError, Result};
 
 pub const SIGNATURE: &[u8] = b".slf";
-pub const BUFFER_SIZE: usize = 64 * 1024;
+pub const VERSION: [u8; 2] = [1, 0]; // 1.0
+pub const BUFFER_SIZE: usize = 128 * 1024;
 
 use pack::pack;
 use unpack::unpack;
@@ -53,10 +51,19 @@ fn main() {
         return;
     }
 
+    let target = if let Some(target) = args.get(3) {
+        Some(PathBuf::from(target))
+    } else {
+        None
+    };
+
     let result = match args[1].as_str() {
-        "pack" => pack(Path::new(&args[2])),
-        "unpack" => unpack(&Path::new(&args[2])),
-        _ => todo!(),
+        "pack" => pack(PathBuf::from(&args[2]), target),
+        "unpack" => unpack(PathBuf::from(&args[2]), target),
+        _ => Err(ArchiveError::Io(format!(
+            "Incorrect usage of '{}', see `--help` for more info",
+            &args[1]
+        ))),
     };
 
     if let Err(e) = result {
@@ -111,9 +118,9 @@ pub struct InnerFile {
     name: OsString,
     original_size: u64,
     compressed_size: u64,
-    offset: u64,
     original_checksum: u32,
     compressed_checksum: u32,
+    position: u64,
 }
 
 impl InnerFile {
@@ -128,14 +135,12 @@ impl InnerFile {
         name: OsString,
         original_size: u64,
         compressed_size: u64,
-        offset: u64,
         original_checksum: u32,
         compressed_checksum: u32,
     ) -> Self {
         let mut file = Self::new(name);
         file.set_original_size(original_size);
         file.set_compressed_size(compressed_size);
-        file.set_offset(offset);
         file.set_original_checksum(original_checksum);
         file.set_compressed_checksum(compressed_checksum);
         file
@@ -162,9 +167,6 @@ impl InnerFile {
         reader.read_exact(&mut buffer[..8])?;
         let compressed_size = u64::from_le_bytes(buffer[..8].try_into()?);
 
-        reader.read_exact(&mut buffer[..8])?;
-        let offset = u64::from_le_bytes(buffer[..8].try_into()?);
-
         reader.read_exact(&mut buffer[..4])?;
         let original_checksum = u32::from_le_bytes(buffer[..4].try_into()?);
 
@@ -175,22 +177,22 @@ impl InnerFile {
             name,
             original_size,
             compressed_size,
-            offset,
             original_checksum,
             compressed_checksum,
         ))
     }
 
     pub fn write_metadata<W: Write + ?Sized + Seek>(
-        &self,
+        &mut self,
         writer: &mut BufWriter<W>,
     ) -> Result<u64> {
-        writer.write_all(&(self.name.len() as u32).to_le_bytes())?;
-        writer.write_all(&self.name.as_bytes())?;
+        self.position = writer.stream_position()?;
+        let name_bytes = self.name.as_encoded_bytes();
+        writer.write_all(&(name_bytes.len() as u32).to_le_bytes())?;
+        writer.write_all(name_bytes)?;
         writer.write_all(&self.original_size.to_le_bytes())?;
         let position = writer.stream_position()?;
         writer.write_all(&self.compressed_size.to_le_bytes())?;
-        writer.write_all(&self.offset.to_le_bytes())?;
         writer.write_all(&self.original_checksum.to_le_bytes())?;
         writer.write_all(&self.compressed_checksum.to_le_bytes())?;
         Ok(position)
@@ -202,10 +204,6 @@ impl InnerFile {
 
     fn set_compressed_size(&mut self, size: u64) {
         self.compressed_size = size
-    }
-
-    fn set_offset(&mut self, offset: u64) {
-        self.offset = offset
     }
 
     fn set_original_checksum(&mut self, checksum: u32) {
@@ -223,19 +221,42 @@ impl Default for InnerFile {
             name: OsString::default(),
             original_size: u64::default(),
             compressed_size: u64::default(),
-            offset: u64::default(),
             original_checksum: u32::default(),
             compressed_checksum: u32::default(),
+            position: u64::default(),
         }
     }
 }
 
-fn validate_path(path: &Path) -> Result<()> {
-    if !path.exists() {
-        return Err(ArchiveError::Path(format!(
-            "File or directory doesn't exist at this path: {}",
-            path.display()
-        )));
-    };
-    Ok(())
+fn normalize_path(path: &PathBuf) -> PathBuf {
+    let mut normalized = Vec::new();
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(p) => {
+                normalized.clear();
+                normalized.push(Component::Prefix(p));
+            }
+            Component::RootDir => {
+                normalized.clear();
+                normalized.push(Component::RootDir);
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if let Some(last) = normalized.last() {
+                    match last {
+                        Component::Normal(_) => {
+                            normalized.pop();
+                        }
+                        Component::RootDir => {}
+                        _ => {}
+                    }
+                } else {
+                    normalized.push(component);
+                }
+            }
+            Component::Normal(_) => normalized.push(component),
+        }
+    }
+    normalized.iter().collect()
 }
