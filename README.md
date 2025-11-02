@@ -8,8 +8,14 @@ Small file archiver written in Rust
 - [x] Index array
 - [x] Versioning support
 - [x] Cross-platform support
-- [ ] `--help` command
+- [ ] `--help` commands
 - [ ] Unsafe `as` to `::try_into()`
 - [ ] File type sensivity
 - [ ] `thiserror`
+- [ ] `list` command
+- [ ] `get` command (get 'i' file from archive)
+- [ ] Emerge exit processing
+- [ ] Progress bar and logs
+- [ ] Configurable
+- [ ] Smart compression (flags: `-s` (smart), `-n` (none), `-f` (force))
 - [ ] Concurrency
