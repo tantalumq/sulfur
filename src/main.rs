@@ -29,9 +29,6 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 
-#[cfg(windows)]
-use std::os::windows::ffi::OsStringExt;
-
 use clap::{Parser, Subcommand};
 use flate2::Crc;
 
@@ -172,7 +169,7 @@ impl InnerFile {
         }
 
         reader.read_exact(&mut buffer[..(name_len)])?;
-        let name = OsString::from_vec(buffer[..(name_len)].to_vec());
+        let name = bytes_to_os_string(&buffer[..(name_len)]);
 
         reader.read_exact(&mut buffer[..8])?;
         let original_size = u64::from_be_bytes(buffer[..8].try_into()?);
@@ -256,4 +253,14 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
     normalized.iter().collect()
+}
+
+#[cfg(unix)]
+fn bytes_to_os_string(bytes: &[u8]) -> OsString {
+    OsString::from_vec(bytes.to_vec())
+}
+
+#[cfg(windows)]
+fn bytes_to_os_string(bytes: &[u8]) -> OsString {
+    String::from_utf8_lossy(bytes).into_owned().into()
 }
