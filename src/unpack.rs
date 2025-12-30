@@ -12,23 +12,20 @@ use crate::{
     normalize_path,
 };
 
-pub fn unpack(source: PathBuf, target: Option<PathBuf>) -> Result<()> {
-    let target = if let Some(path) = target {
-        path
-    } else {
-        PathBuf::from(source.parent().unwrap_or(Path::new(".")))
-    };
+#[allow(clippy::missing_errors_doc)]
+pub fn unpack(source: &Path, target: &Path) -> Result<()> {
+    let extraction_path = get_extraction_path(source, target)?;
 
-    let extraction_path = get_extraction_path(&source, &target)?;
-
-    let file = File::open(&source)?;
+    let file = File::open(source)?;
     let mut reader = BufReader::new(file);
+
+    #[allow(clippy::large_stack_arrays)]
     let mut buffer = [0u8; BUFFER_SIZE];
 
-    validate_archive(&mut reader, &mut buffer, &source)?;
+    validate_archive(&mut reader, &mut buffer, source)?;
 
     reader.read_exact(&mut buffer[..4])?;
-    let file_count = u32::from_le_bytes(buffer[..4].try_into()?);
+    let file_count = u32::from_be_bytes(buffer[..4].try_into()?);
 
     reader.read_exact(&mut buffer[..8])?; // skip index offset
 
@@ -51,7 +48,12 @@ pub fn unpack(source: PathBuf, target: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn validate_archive(reader: &mut BufReader<File>, buffer: &mut [u8], path: &PathBuf) -> Result<()> {
+#[allow(clippy::missing_errors_doc)]
+pub fn validate_archive(
+    reader: &mut BufReader<File>,
+    buffer: &mut [u8],
+    path: &Path,
+) -> Result<()> {
     reader.read_exact(&mut buffer[..4])?;
     if &buffer[..4] != SIGNATURE {
         return Err(ArchiveError::Path(format!(
@@ -79,13 +81,7 @@ fn unpack_files(
     for _ in 0..file_count {
         let inner_file = InnerFile::from_archive(reader, buffer)?;
 
-        let mut file_path = if file_count > 1 {
-            dir_path.join(&inner_file.name)
-        } else {
-            PathBuf::from(&inner_file.name)
-        };
-
-        file_path = normalize_path(&file_path);
+        let file_path = safe_join(dir_path, Path::new(&inner_file.name))?;
 
         if let Some(parents) = file_path.parent() {
             create_dir_all(parents)?;
@@ -125,12 +121,39 @@ fn unpack_files(
     Ok(())
 }
 
-fn get_extraction_path(source: &PathBuf, target: &PathBuf) -> Result<PathBuf> {
+fn safe_join(base: &Path, untrusted: &Path) -> Result<PathBuf> {
+    let cleaned: PathBuf = untrusted
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+
+    if cleaned.as_os_str().is_empty() {
+        return Err(ArchiveError::Path(format!(
+            "Path sanitazed to nothing: {}",
+            untrusted.display()
+        )));
+    }
+
+    let result = base.join(&cleaned);
+
+    if !result.starts_with(base) {
+        return Err(ArchiveError::Path(format!(
+            "path traversal detected: {}",
+            untrusted.display()
+        )));
+    }
+
+    Ok(result)
+}
+
+fn get_extraction_path(source: &Path, target: &Path) -> Result<PathBuf> {
     let source = normalize_path(source);
     let target = normalize_path(target);
 
-    if !source.exists() || !source.is_file() || !source.extension().map_or(false, |ex| ex == "slf")
-    {
+    if !source.exists() || !source.is_file() || source.extension().is_none_or(|ex| ex != "slf") {
         return Err(ArchiveError::Path(format!(
             "Invalid source destination at path: {}",
             source.display()
@@ -160,7 +183,7 @@ fn unpack_single_file(
     let mut remaining_bytes = inner_file.compressed_size;
 
     loop {
-        let to_read = remaining_bytes.min(BUFFER_SIZE as u64) as usize;
+        let to_read = usize::try_from(remaining_bytes.min(BUFFER_SIZE as u64))?;
 
         let bytes = reader.read(&mut buffer[..to_read])?;
 

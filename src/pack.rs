@@ -2,6 +2,7 @@ use std::{
     fs::{File, create_dir_all},
     io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    result,
 };
 
 use flate2::{Compression, Crc, write::GzEncoder};
@@ -15,14 +16,9 @@ use crate::{
 
 use crate::{BUFFER_SIZE, HasherWriter, InnerFile, SIGNATURE};
 
-pub fn pack(source: PathBuf, target: Option<PathBuf>) -> Result<()> {
-    let target = if let Some(path) = target {
-        path
-    } else {
-        PathBuf::from(source.parent().unwrap_or(Path::new(".")))
-    };
-
-    let archive_path = get_archive_path(&source, &target)?;
+#[allow(clippy::missing_errors_doc)]
+pub fn pack(source: &Path, target: &Path) -> Result<()> {
+    let archive_path = get_archive_path(source, target)?;
     if let Some(parents) = archive_path.parent() {
         create_dir_all(parents)?;
     }
@@ -30,21 +26,21 @@ pub fn pack(source: PathBuf, target: Option<PathBuf>) -> Result<()> {
     let file = File::create(archive_path)?;
     let mut writer = BufWriter::new(file);
 
-    let files: Vec<PathBuf> = collect_files(&source);
+    let files: Vec<PathBuf> = collect_files(source);
 
     writer.write_all(SIGNATURE)?;
     writer.write_all(&VERSION)?;
-    writer.write_all(&u32::try_from(files.len())?.to_le_bytes())?; //file count
-    writer.write_all(&u64::to_le_bytes(0))?; //index offset
+    writer.write_all(&u32::try_from(files.len())?.to_be_bytes())?; //file count
+    writer.write_all(&u64::to_be_bytes(0))?; //index offset
 
-    let mut inners = inner_files(&source, &files)?;
+    let mut inners = inner_files(source, &files)?;
 
     let (temp_offsets, compressed_sizes, checksums) =
-        process_files(&mut inners, files, &mut writer)?;
+        process_files(&mut inners, &files, &mut writer)?;
 
     writer.flush()?;
 
-    rewrite_temp_fields(&mut writer, temp_offsets, compressed_sizes, checksums)?;
+    rewrite_temp_fields(&mut writer, &temp_offsets, &compressed_sizes, &checksums)?;
 
     write_index_array(&mut writer, &inners)?;
 
@@ -52,7 +48,7 @@ pub fn pack(source: PathBuf, target: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn get_archive_path(source: &PathBuf, target: &PathBuf) -> Result<PathBuf> {
+fn get_archive_path(source: &Path, target: &Path) -> Result<PathBuf> {
     let source = normalize_path(source);
     let target = normalize_path(target);
 
@@ -62,7 +58,7 @@ fn get_archive_path(source: &PathBuf, target: &PathBuf) -> Result<PathBuf> {
             source.display()
         )));
     }
-    Ok(if target.extension().map_or(false, |ex| ex == "slf") {
+    Ok(if target.extension().is_some_and(|ex| ex == "slf") {
         target
     } else {
         let archive_name = get_archive_name(&source)?;
@@ -70,7 +66,7 @@ fn get_archive_path(source: &PathBuf, target: &PathBuf) -> Result<PathBuf> {
     })
 }
 
-fn get_archive_name(source: &PathBuf) -> Result<PathBuf> {
+fn get_archive_name(source: &Path) -> Result<PathBuf> {
     Ok(if source.is_file() {
         PathBuf::from(source.file_stem().ok_or(ArchiveError::Path(format!(
             "Failed to get file stem from path: {}",
@@ -90,7 +86,7 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
     } else {
         WalkDir::new(root)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(result::Result::ok)
             .filter(|e| e.file_type().is_file())
             .map(|e| e.path().to_path_buf())
             .collect()
@@ -120,9 +116,10 @@ fn inner_files(root: &Path, paths: &Vec<PathBuf>) -> Result<Vec<InnerFile>> {
     Ok(inners)
 }
 
+#[allow(clippy::type_complexity)]
 fn process_files(
-    inners: &mut Vec<InnerFile>,
-    paths: Vec<PathBuf>,
+    inners: &mut [InnerFile],
+    paths: &[PathBuf],
     writer: &mut BufWriter<File>,
 ) -> Result<(Vec<u64>, Vec<u64>, Vec<(u32, u32)>)> {
     let mut temp_offsets = Vec::new();
@@ -153,6 +150,7 @@ fn process_single_file(
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
 
+    #[allow(clippy::large_stack_arrays)]
     let mut buffer = [0u8; BUFFER_SIZE];
 
     let mut original_checksum = Crc::new();
@@ -174,10 +172,10 @@ fn compress_file_content<R: Read, W: Write>(
     reader: &mut R,
     mut encoder: GzEncoder<W>,
     checksum: &mut Crc,
-    mut buffer: &mut [u8],
+    buffer: &mut [u8],
 ) -> Result<W> {
     loop {
-        let bytes = reader.read(&mut buffer)?;
+        let bytes = reader.read(buffer)?;
 
         if bytes == 0 {
             break; //EOF
@@ -185,7 +183,7 @@ fn compress_file_content<R: Read, W: Write>(
 
         let chunk = &buffer[..bytes];
 
-        checksum.update(&chunk);
+        checksum.update(chunk);
 
         encoder.write_all(chunk)?;
     }
@@ -195,21 +193,21 @@ fn compress_file_content<R: Read, W: Write>(
 
 fn rewrite_temp_fields(
     writer: &mut BufWriter<File>,
-    temp_offsets: Vec<u64>,
-    compressed_sizes: Vec<u64>,
-    checksums: Vec<(u32, u32)>,
+    temp_offsets: &[u64],
+    compressed_sizes: &[u64],
+    checksums: &[(u32, u32)],
 ) -> Result<()> {
     let end = writer.stream_position()?;
     writer.seek(SeekFrom::Start(10))?;
-    writer.write_all(&end.to_le_bytes())?;
+    writer.write_all(&end.to_be_bytes())?;
     writer.flush()?;
     for (i, &position) in temp_offsets.iter().enumerate() {
         writer.seek(SeekFrom::Start(position))?;
         let size = compressed_sizes[i];
         let checksum = checksums[i];
-        writer.write_all(&size.to_le_bytes())?;
-        writer.write_all(&checksum.0.to_le_bytes())?;
-        writer.write_all(&checksum.1.to_le_bytes())?;
+        writer.write_all(&size.to_be_bytes())?;
+        writer.write_all(&checksum.0.to_be_bytes())?;
+        writer.write_all(&checksum.1.to_be_bytes())?;
         writer.flush()?;
     }
     writer.seek(SeekFrom::Start(end))?;
@@ -219,7 +217,7 @@ fn rewrite_temp_fields(
 fn write_index_array(writer: &mut BufWriter<File>, inners: &Vec<InnerFile>) -> Result<()> {
     for inner in inners {
         let position = inner.position;
-        writer.write_all(&position.to_le_bytes())?;
+        writer.write_all(&position.to_be_bytes())?;
     }
 
     Ok(())

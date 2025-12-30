@@ -17,27 +17,25 @@ pub enum ArchiveError {
 impl fmt::Display for ArchiveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(c) => write!(f, "{}", c),
-            Self::Path(c) => write!(f, "{}", c),
             Self::BufferOverflow(found) => write!(
                 f,
-                "Buffer overflow: {} bytes less, then {} bytes",
-                BUFFER_SIZE, found
+                "Buffer overflow: {BUFFER_SIZE} bytes less, then {found} bytes",
             ),
             Self::UnsupportedVersion(v) => write!(
                 f,
-                "Archive file has unsupported version: Current version suppots only {:?}.x archives, when {} was supplied",
-                VERSION[0], v
+                "Archive file has unsupported version: Current version suppots only {:?}.x archives, when {v} was supplied",
+                VERSION[0]
             ),
             Self::IncorrectType(c) => write!(
                 f,
-                "Incorrect type of the provided archive: expected '.slf', found '.{}'",
-                c
+                "Incorrect type of the provided archive: expected '.slf', found '.{c}'"
             ),
-            Self::CorruptedArchive(c) => write!(f, "{}", c),
             Self::EmptyFilename => write!(f, "Filename is empty"),
-            Self::TryFromSlice(c) => write!(f, "{}", c),
-            Self::TryFromInt(c) => write!(f, "{}", c),
+            Self::Io(c)
+            | Self::Path(c)
+            | Self::CorruptedArchive(c)
+            | Self::TryFromSlice(c)
+            | Self::TryFromInt(c) => write!(f, "{c}"),
         }
     }
 }

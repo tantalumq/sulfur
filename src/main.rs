@@ -1,7 +1,7 @@
 /*
 .slf File structure:
 Signature (4 bytes = '.slf'),
-version (2 bytes),
+version (2 bytes = 'xx' ),
 count of files (4 bytes),
 index offset (8 bytes)
  | length of file name(4 bytes),
@@ -20,11 +20,10 @@ pub mod pack;
 pub mod unpack;
 
 use std::{
-    env,
     ffi::OsString,
     fs::File,
     io::{self, BufWriter, Read, Seek, Write},
-    path::{Component, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 #[cfg(unix)]
@@ -33,6 +32,7 @@ use std::os::unix::ffi::OsStringExt;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStringExt;
 
+use clap::{Parser, Subcommand};
 use flate2::Crc;
 
 use crate::error::{ArchiveError, Result};
@@ -45,30 +45,37 @@ use pack::pack;
 use unpack::unpack;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        eprintln!("Usage: {} <pack|unpack> <directory|file>", args[0]);
-        return;
-    }
-
-    let target = if let Some(target) = args.get(3) {
-        Some(PathBuf::from(target))
-    } else {
-        None
-    };
-
-    let result = match args[1].as_str() {
-        "pack" => pack(PathBuf::from(&args[2]), target),
-        "unpack" => unpack(PathBuf::from(&args[2]), target),
-        _ => Err(ArchiveError::Io(format!(
-            "Incorrect usage of '{}', see `--help` for more info",
-            &args[1]
-        ))),
+    let cli = Cli::parse();
+    let result = match cli.command {
+        Command::Pack { source, target } => pack(&source, &target),
+        Command::Unpack { source, target } => unpack(&source, &target),
     };
 
     if let Err(e) = result {
-        eprintln!("[ERROR] {}", e)
+        eprintln!("[ERROR] {e}");
     }
+}
+
+#[derive(Parser)]
+#[command(version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Pack {
+        source: PathBuf,
+        #[arg(short = 'o', long, default_value = "./")]
+        target: PathBuf,
+    },
+
+    Unpack {
+        source: PathBuf,
+        #[arg(short = 'o', long, default_value = "./")]
+        target: PathBuf,
+    },
 }
 
 pub struct HasherWriter<'a> {
@@ -86,10 +93,12 @@ impl<'a> HasherWriter<'a> {
         }
     }
 
+    #[must_use]
     pub fn sum(&self) -> u32 {
         self.hasher.sum()
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn stream_position(&mut self) -> error::Result<u64> {
         let pos = self.writer.stream_position()?;
         Ok(pos)
@@ -101,7 +110,7 @@ impl<'a> HasherWriter<'a> {
         old
     }
 }
-impl<'a> Write for HasherWriter<'a> {
+impl Write for HasherWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.hasher.update(buf);
         let bytes = self.writer.write(buf)?;
@@ -114,6 +123,7 @@ impl<'a> Write for HasherWriter<'a> {
     }
 }
 
+#[derive(Default)]
 pub struct InnerFile {
     name: OsString,
     original_size: u64,
@@ -124,6 +134,7 @@ pub struct InnerFile {
 }
 
 impl InnerFile {
+    #[must_use]
     pub fn new(name: OsString) -> Self {
         Self {
             name,
@@ -131,6 +142,7 @@ impl InnerFile {
         }
     }
 
+    #[must_use]
     pub fn create(
         name: OsString,
         original_size: u64,
@@ -146,32 +158,33 @@ impl InnerFile {
         file
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn from_archive<R: Read + Seek>(reader: &mut R, buffer: &mut [u8]) -> Result<Self> {
         reader.read_exact(&mut buffer[..4])?;
-        let name_len = u32::from_le_bytes(buffer[..4].try_into()?) as usize;
+        let name_len = u32::from_be_bytes(buffer[..4].try_into()?) as usize;
 
         if name_len == 0 {
             return Err(ArchiveError::EmptyFilename);
         }
 
-        if name_len as usize > BUFFER_SIZE {
-            return Err(ArchiveError::BufferOverflow(name_len as usize));
+        if name_len > BUFFER_SIZE {
+            return Err(ArchiveError::BufferOverflow(name_len));
         }
 
-        reader.read_exact(&mut buffer[..(name_len as usize)])?;
-        let name = OsString::from_vec(buffer[..(name_len as usize)].to_vec());
+        reader.read_exact(&mut buffer[..(name_len)])?;
+        let name = OsString::from_vec(buffer[..(name_len)].to_vec());
 
         reader.read_exact(&mut buffer[..8])?;
-        let original_size = u64::from_le_bytes(buffer[..8].try_into()?);
+        let original_size = u64::from_be_bytes(buffer[..8].try_into()?);
 
         reader.read_exact(&mut buffer[..8])?;
-        let compressed_size = u64::from_le_bytes(buffer[..8].try_into()?);
+        let compressed_size = u64::from_be_bytes(buffer[..8].try_into()?);
 
         reader.read_exact(&mut buffer[..4])?;
-        let original_checksum = u32::from_le_bytes(buffer[..4].try_into()?);
+        let original_checksum = u32::from_be_bytes(buffer[..4].try_into()?);
 
         reader.read_exact(&mut buffer[..4])?;
-        let compressed_checksum = u32::from_le_bytes(buffer[..4].try_into()?);
+        let compressed_checksum = u32::from_be_bytes(buffer[..4].try_into()?);
 
         Ok(InnerFile::create(
             name,
@@ -182,53 +195,41 @@ impl InnerFile {
         ))
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn write_metadata<W: Write + ?Sized + Seek>(
         &mut self,
         writer: &mut BufWriter<W>,
     ) -> Result<u64> {
         self.position = writer.stream_position()?;
         let name_bytes = self.name.as_encoded_bytes();
-        writer.write_all(&(name_bytes.len() as u32).to_le_bytes())?;
+        writer.write_all(&(u32::try_from(name_bytes.len())?).to_be_bytes())?;
         writer.write_all(name_bytes)?;
-        writer.write_all(&self.original_size.to_le_bytes())?;
+        writer.write_all(&self.original_size.to_be_bytes())?;
         let position = writer.stream_position()?;
-        writer.write_all(&self.compressed_size.to_le_bytes())?;
-        writer.write_all(&self.original_checksum.to_le_bytes())?;
-        writer.write_all(&self.compressed_checksum.to_le_bytes())?;
+        writer.write_all(&self.compressed_size.to_be_bytes())?;
+        writer.write_all(&self.original_checksum.to_be_bytes())?;
+        writer.write_all(&self.compressed_checksum.to_be_bytes())?;
         Ok(position)
     }
 
     fn set_original_size(&mut self, size: u64) {
-        self.original_size = size
+        self.original_size = size;
     }
 
     fn set_compressed_size(&mut self, size: u64) {
-        self.compressed_size = size
+        self.compressed_size = size;
     }
 
     fn set_original_checksum(&mut self, checksum: u32) {
-        self.original_checksum = checksum
+        self.original_checksum = checksum;
     }
 
     fn set_compressed_checksum(&mut self, checksum: u32) {
-        self.compressed_checksum = checksum
+        self.compressed_checksum = checksum;
     }
 }
 
-impl Default for InnerFile {
-    fn default() -> Self {
-        Self {
-            name: OsString::default(),
-            original_size: u64::default(),
-            compressed_size: u64::default(),
-            original_checksum: u32::default(),
-            compressed_checksum: u32::default(),
-            position: u64::default(),
-        }
-    }
-}
-
-fn normalize_path(path: &PathBuf) -> PathBuf {
+fn normalize_path(path: &Path) -> PathBuf {
     let mut normalized = Vec::new();
 
     for component in path.components() {
@@ -244,12 +245,8 @@ fn normalize_path(path: &PathBuf) -> PathBuf {
             Component::CurDir => {}
             Component::ParentDir => {
                 if let Some(last) = normalized.last() {
-                    match last {
-                        Component::Normal(_) => {
-                            normalized.pop();
-                        }
-                        Component::RootDir => {}
-                        _ => {}
+                    if let Component::Normal(_) = last {
+                        normalized.pop();
                     }
                 } else {
                     normalized.push(component);
