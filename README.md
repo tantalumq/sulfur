@@ -4,7 +4,6 @@ Small file archiver written in Rust
 ## TODOs
 - [x] Main archiver functions (unpack, pack)
 - [x] Error handling
-- [x] Big refactor
 - [x] Index array
 - [x] Versioning support
 - [x] Cross-platform support
@@ -17,6 +16,6 @@ Small file archiver written in Rust
 - [ ] Progress bar and logs
 - [ ] Configurable
 - [ ] Smart compression (flags: `-s` (smart), `-n` (none), `-f` (force))
-- [ ] Move to lib
+- [x] Move to lib
 - [ ] `thiserror`
 - [ ] Concurrency
