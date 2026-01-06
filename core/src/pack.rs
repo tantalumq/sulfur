@@ -30,7 +30,7 @@ pub fn pack(source: &Path, target: &Path) -> Result<()> {
 
     writer.write_all(SIGNATURE)?;
     writer.write_all(&VERSION)?;
-    writer.write_all(&u32::try_from(files.len())?.to_be_bytes())?; //file count
+    writer.write_all(&u32::try_from(files.len())?.to_be_bytes())?; // file count
     writer.write_all(&u64::to_be_bytes(0))?; //index offset
 
     let mut inners = inner_files(source, &files)?;
@@ -150,17 +150,20 @@ fn process_single_file(
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
 
-    #[allow(clippy::large_stack_arrays)]
-    let mut buffer = [0u8; BUFFER_SIZE];
+    let mut buffer = vec![0u8; BUFFER_SIZE];
 
     let mut original_checksum = Crc::new();
 
     let encoder = GzEncoder::new(hasher_writer, Compression::default());
 
-    hasher_writer =
-        compress_file_content(&mut reader, encoder, &mut original_checksum, &mut buffer)?;
+    hasher_writer = compress_file_content(
+        &mut reader,
+        encoder,
+        &mut original_checksum,
+        &mut buffer[..],
+    )?;
 
-    let size = hasher_writer.take_written_bytes();
+    let size = hasher_writer.take_and_reset_bytes();
 
     let original_checksum = original_checksum.sum();
     let compressed_checksum = hasher_writer.sum();
@@ -208,7 +211,6 @@ fn rewrite_temp_fields(
         writer.write_all(&size.to_be_bytes())?;
         writer.write_all(&checksum.0.to_be_bytes())?;
         writer.write_all(&checksum.1.to_be_bytes())?;
-        writer.flush()?;
     }
     writer.seek(SeekFrom::Start(end))?;
     Ok(())

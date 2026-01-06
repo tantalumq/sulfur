@@ -6,7 +6,7 @@ Small file archiver written in Rust
 - [x] Error handling
 - [x] Index array
 - [x] Versioning support
-- [x] Cross-platform support
+- [ ] Cross-platform support
 - [x] little-endian to big-endian
 - [x] Use clap
 - [x] Unsafe `as` to `::try_into()`
@@ -17,5 +17,6 @@ Small file archiver written in Rust
 - [ ] Configurable
 - [ ] Smart compression (flags: `-s` (smart), `-n` (none), `-f` (force))
 - [x] Move to lib
-- [ ] `thiserror`
+- [x] `thiserror`
+- [ ] Alignment 
 - [ ] Concurrency

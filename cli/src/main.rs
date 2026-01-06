@@ -2,7 +2,7 @@
 .slf File structure:
 Signature (4 bytes = '.slf'),
 version (2 bytes = 'xx' ),
-count of files (4 bytes),
+file count (4 bytes),
 index offset (8 bytes)
  | length of file name(4 bytes),
  | name ('length' bytes),
@@ -19,17 +19,23 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use sulfur_core::{pack, unpack};
+use sulfur_core::{get, pack, unpack};
 
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Pack { source, target } => pack(&source, &target),
         Command::Unpack { source, target } => unpack(&source, &target),
+        Command::Get {
+            source,
+            target,
+            index,
+        } => get(&source, &target, index),
     };
 
     if let Err(e) = result {
         eprintln!("[ERROR] {e}");
+        std::process::exit(1);
     }
 }
 
@@ -52,5 +58,11 @@ enum Command {
         source: PathBuf,
         #[arg(short = 'o', long, default_value = "./")]
         target: PathBuf,
+    },
+    Get {
+        source: PathBuf,
+        #[arg(short = 'o', long, default_value = "./")]
+        target: PathBuf,
+        index: u32,
     },
 }

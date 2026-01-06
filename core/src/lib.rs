@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
     fs::File,
-    io::{self, BufWriter, Read, Seek, Write},
+    io::{self, BufReader, BufWriter, Read, Seek, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -13,9 +13,11 @@ use flate2::Crc;
 use crate::error::{ArchiveError, Result};
 
 pub mod error;
+pub mod get;
 pub mod pack;
 pub mod unpack;
 
+pub use get::get;
 pub use pack::pack;
 pub use unpack::unpack;
 
@@ -49,7 +51,7 @@ impl<'a> HasherWriter<'a> {
         Ok(pos)
     }
 
-    pub fn take_written_bytes(&mut self) -> u64 {
+    pub fn take_and_reset_bytes(&mut self) -> u64 {
         let old = self.bytes;
         self.bytes = 0;
         old
@@ -211,4 +213,77 @@ fn bytes_to_os_string(bytes: &[u8]) -> OsString {
 #[cfg(windows)]
 fn bytes_to_os_string(bytes: &[u8]) -> OsString {
     String::from_utf8_lossy(bytes).into_owned().into()
+}
+
+fn get_extraction_path(source: &Path, target: &Path) -> Result<PathBuf> {
+    let source = normalize_path(source);
+    let target = normalize_path(target);
+
+    if !source.exists() || !source.is_file() || source.extension().is_none_or(|ex| ex != "slf") {
+        return Err(ArchiveError::Path(format!(
+            "Invalid source destination at path: {}",
+            source.display()
+        )));
+    }
+
+    Ok(if target.is_file() {
+        return Err(ArchiveError::Path(format!(
+            "Archive can't be unpacked into file at path: {}",
+            target.display(),
+        )));
+    } else {
+        target
+    })
+}
+
+#[allow(clippy::missing_errors_doc)]
+pub fn validate_archive(
+    reader: &mut BufReader<File>,
+    buffer: &mut [u8],
+    path: &Path,
+) -> Result<()> {
+    reader.read_exact(&mut buffer[..4])?;
+    if &buffer[..4] != SIGNATURE {
+        return Err(ArchiveError::Path(format!(
+            "File is corrupted or has incorrect type. File at path: {}",
+            path.display()
+        )));
+    }
+
+    reader.read_exact(&mut buffer[..2])?;
+    if buffer[0] != VERSION[0] {
+        return Err(ArchiveError::Path(format!(
+            "File is corrupted or has incorrect type. File at path: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn safe_join(base: &Path, untrusted: &Path) -> Result<PathBuf> {
+    let cleaned: PathBuf = untrusted
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+
+    if cleaned.as_os_str().is_empty() {
+        return Err(ArchiveError::Path(format!(
+            "Path sanitazed to nothing: {}",
+            untrusted.display()
+        )));
+    }
+
+    let result = base.join(&cleaned);
+
+    if !result.starts_with(base) {
+        return Err(ArchiveError::Path(format!(
+            "path traversal detected: {}",
+            untrusted.display()
+        )));
+    }
+
+    Ok(result)
 }
