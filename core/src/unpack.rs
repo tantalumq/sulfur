@@ -103,7 +103,7 @@ fn unpack_single_file(
     let mut remaining_bytes = inner_file.compressed_size;
 
     loop {
-        let to_read = usize::try_from(remaining_bytes.min(BUFFER_SIZE as u64))?;
+        let to_read = usize::try_from(remaining_bytes.min(buffer.len() as u64))?;
 
         let bytes = reader.read(&mut buffer[..to_read])?;
 

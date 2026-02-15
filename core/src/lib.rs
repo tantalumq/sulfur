@@ -14,10 +14,12 @@ use crate::error::{ArchiveError, Result};
 
 pub mod error;
 pub mod get;
+pub mod info;
 pub mod pack;
 pub mod unpack;
 
 pub use get::get;
+pub use info::info;
 pub use pack::pack;
 pub use unpack::unpack;
 
@@ -59,8 +61,8 @@ impl<'a> HasherWriter<'a> {
 }
 impl Write for HasherWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.hasher.update(buf);
         let bytes = self.writer.write(buf)?;
+        self.hasher.update(&buf[..bytes]);
         self.bytes += bytes as u64;
         Ok(bytes)
     }
@@ -70,7 +72,7 @@ impl Write for HasherWriter<'_> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct InnerFile {
     name: OsString,
     original_size: u64,
@@ -98,15 +100,15 @@ impl InnerFile {
         compressed_checksum: u32,
     ) -> Self {
         let mut file = Self::new(name);
-        file.set_original_size(original_size);
-        file.set_compressed_size(compressed_size);
-        file.set_original_checksum(original_checksum);
-        file.set_compressed_checksum(compressed_checksum);
+        file.original_size = original_size;
+        file.compressed_size = compressed_size;
+        file.original_checksum = original_checksum;
+        file.compressed_checksum = compressed_checksum;
         file
     }
 
     #[allow(clippy::missing_errors_doc)]
-    pub fn from_archive<R: Read + Seek>(reader: &mut R, buffer: &mut [u8]) -> Result<Self> {
+    pub fn from_archive<R: Read>(reader: &mut R, buffer: &mut [u8]) -> Result<Self> {
         reader.read_exact(&mut buffer[..4])?;
         let name_len = u32::from_be_bytes(buffer[..4].try_into()?) as usize;
 
@@ -114,7 +116,7 @@ impl InnerFile {
             return Err(ArchiveError::EmptyFilename);
         }
 
-        if name_len > BUFFER_SIZE {
+        if name_len > buffer.len() {
             return Err(ArchiveError::BufferOverflow(name_len));
         }
 
@@ -157,22 +159,6 @@ impl InnerFile {
         writer.write_all(&self.original_checksum.to_be_bytes())?;
         writer.write_all(&self.compressed_checksum.to_be_bytes())?;
         Ok(position)
-    }
-
-    fn set_original_size(&mut self, size: u64) {
-        self.original_size = size;
-    }
-
-    fn set_compressed_size(&mut self, size: u64) {
-        self.compressed_size = size;
-    }
-
-    fn set_original_checksum(&mut self, checksum: u32) {
-        self.original_checksum = checksum;
-    }
-
-    fn set_compressed_checksum(&mut self, checksum: u32) {
-        self.compressed_checksum = checksum;
     }
 }
 

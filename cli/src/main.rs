@@ -19,18 +19,25 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use sulfur_core::{get, pack, unpack};
+use sulfur_core::{get, info, pack, unpack};
 
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Pack { source, target } => pack(&source, &target),
-        Command::Unpack { source, target } => unpack(&source, &target),
+        Command::Pack { source, output } => pack(&source, &output),
+        Command::Unpack { source, output } => unpack(&source, &output),
         Command::Get {
             source,
-            target,
+            output,
             index,
-        } => get(&source, &target, index),
+        } => get(&source, &output, index),
+        Command::Info { source } => match info(&source) {
+            Ok(i) => {
+                println!("{i}");
+                Ok(())
+            }
+            Err(e) => Err(e),
+        },
     };
 
     if let Err(e) = result {
@@ -51,18 +58,21 @@ enum Command {
     Pack {
         source: PathBuf,
         #[arg(short = 'o', long, default_value = "./")]
-        target: PathBuf,
+        output: PathBuf,
     },
 
     Unpack {
         source: PathBuf,
         #[arg(short = 'o', long, default_value = "./")]
-        target: PathBuf,
+        output: PathBuf,
     },
     Get {
         source: PathBuf,
         #[arg(short = 'o', long, default_value = "./")]
-        target: PathBuf,
+        output: PathBuf,
         index: u32,
+    },
+    Info {
+        source: PathBuf,
     },
 }
