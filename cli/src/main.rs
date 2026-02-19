@@ -2,7 +2,9 @@
 .slf File structure:
 Signature (4 bytes = '.slf'),
 version (2 bytes = 'xx' ),
+padding (2 bytes),
 file count (4 bytes),
+padding (4 bytes),
 index offset (8 bytes)
  | length of file name(4 bytes),
  | name ('length' bytes),
@@ -27,9 +29,9 @@ fn main() {
         Command::Pack { source, output } => pack(&source, &output),
         Command::Unpack { source, output } => unpack(&source, &output),
         Command::Get {
+            index,
             source,
             output,
-            index,
         } => get(&source, &output, index),
         Command::Info { source } => match info(&source) {
             Ok(i) => {
@@ -67,10 +69,10 @@ enum Command {
         output: PathBuf,
     },
     Get {
+        index: u32,
         source: PathBuf,
         #[arg(short = 'o', long, default_value = "./")]
         output: PathBuf,
-        index: u32,
     },
     Info {
         source: PathBuf,

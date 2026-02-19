@@ -96,8 +96,12 @@ pub fn info(source: &Path) -> Result<ArchiveInfo> {
 
     let version = buffer[..2].try_into()?;
 
+    reader.read_exact(&mut buffer[..2])?; // skip padding
+
     reader.read_exact(&mut buffer[..4])?;
     let file_count = u32::from_be_bytes(buffer[0..4].try_into()?);
+
+    reader.read_exact(&mut buffer[..4])?; // skip padding
 
     reader.read_exact(&mut buffer[..8])?;
     let index_offset = u64::from_be_bytes(buffer[..8].try_into()?);

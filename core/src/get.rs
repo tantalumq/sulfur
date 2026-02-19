@@ -19,12 +19,16 @@ pub fn get(source: &Path, target: &Path, index: u32) -> Result<()> {
 
     validate_archive(&mut reader, &mut buffer[..], source)?;
 
+    reader.read_exact(&mut buffer[..2])?; // skip padding
+
     reader.read_exact(&mut buffer[..4])?;
     let file_count = u32::from_be_bytes(buffer[..4].try_into()?);
 
     if index >= file_count {
         return Err(ArchiveError::IndexOutOfRange { index, file_count });
     }
+
+    reader.read_exact(&mut buffer[..4])?; // skip padding
 
     reader.read_exact(&mut buffer[..8])?;
     let index_offset = u64::from_be_bytes(buffer[..8].try_into()?);

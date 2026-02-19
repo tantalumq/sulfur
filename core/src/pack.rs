@@ -30,7 +30,9 @@ pub fn pack(source: &Path, target: &Path) -> Result<()> {
 
     writer.write_all(SIGNATURE)?;
     writer.write_all(&VERSION)?;
+    writer.write_all(&[0u8; 2])?; // padding
     writer.write_all(&u32::try_from(files.len())?.to_be_bytes())?; // file count
+    writer.write_all(&[0u8; 4])?; // padding
     writer.write_all(&u64::to_be_bytes(0))?; //index offset
 
     let mut inners = inner_files(source, &files)?;
@@ -201,7 +203,7 @@ fn rewrite_temp_fields(
     checksums: &[(u32, u32)],
 ) -> Result<()> {
     let end = writer.stream_position()?;
-    writer.seek(SeekFrom::Start(10))?;
+    writer.seek(SeekFrom::Start(16))?;
     writer.write_all(&end.to_be_bytes())?;
     writer.flush()?;
     for (i, &position) in temp_offsets.iter().enumerate() {

@@ -23,10 +23,12 @@ pub fn unpack(source: &Path, target: &Path) -> Result<()> {
 
     validate_archive(&mut reader, &mut buffer[..], source)?;
 
+    reader.read_exact(&mut buffer[..2])?; // skip padding
+
     reader.read_exact(&mut buffer[..4])?;
     let file_count = u32::from_be_bytes(buffer[..4].try_into()?);
 
-    reader.read_exact(&mut buffer[..8])?; // skip index offset
+    reader.read_exact(&mut buffer[..12])?; // skip padding and index offset
 
     let dir_path = {
         let source_stem = source.file_stem().ok_or(ArchiveError::Path(format!(
