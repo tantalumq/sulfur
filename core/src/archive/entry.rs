@@ -139,7 +139,7 @@ mod tests {
         let mut cursor = Cursor::new(data);
 
         let result = Entry::decode(&mut cursor);
-        assert!(result.is_err())
+        assert!(result.is_err());
     }
 
     #[test]
@@ -148,7 +148,7 @@ mod tests {
         let mut cursor = Cursor::new(data);
 
         let result = Entry::decode(&mut cursor);
-        assert!(result.is_err())
+        assert!(result.is_err());
     }
 
     #[test]
@@ -159,7 +159,7 @@ mod tests {
         let mut cursor = Cursor::new(data);
 
         let result = Entry::decode(&mut cursor);
-        assert!(result.is_err())
+        assert!(result.is_err());
     }
 
     #[test]
@@ -171,7 +171,7 @@ mod tests {
         let mut cursor = Cursor::new(data);
 
         let result = Entry::decode(&mut cursor);
-        assert!(result.is_err())
+        assert!(result.is_err());
     }
     #[test]
     fn test_entry_decode_with_eof_metadata() {
@@ -182,6 +182,6 @@ mod tests {
         let mut cursor = Cursor::new(data);
 
         let result = Entry::decode(&mut cursor);
-        assert!(result.is_err())
+        assert!(result.is_err());
     }
 }

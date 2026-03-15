@@ -103,7 +103,7 @@ pub fn safe_join(base: &Path, untrusted: &Path) -> Result<PathBuf> {
                     untrusted.display()
                 )));
             }
-            Component::CurDir => continue,
+            Component::CurDir => {}
             Component::ParentDir => {
                 return Err(Error::Path(format!(
                     "path traversal detected: {}",
@@ -135,7 +135,7 @@ mod tests {
     fn test_safe_join_path_traversal() {
         let base = Path::new("/base");
         let untrusted = Path::new("../../etc/passwd");
-        assert!(safe_join(base, untrusted).is_err())
+        assert!(safe_join(base, untrusted).is_err());
     }
 
     #[test]
@@ -152,18 +152,18 @@ mod tests {
     #[test]
     fn test_normalize_path_separators() {
         assert_eq!(normalize_path(Path::new("a//b")), PathBuf::from("a/b"));
-        assert_eq!(normalize_path(Path::new("//a//b")), PathBuf::from("/a/b"))
+        assert_eq!(normalize_path(Path::new("//a//b")), PathBuf::from("/a/b"));
     }
 
     #[test]
     fn test_normalize_path_current_dir() {
         assert_eq!(normalize_path(Path::new("./a/./b")), PathBuf::from("a/b"));
-        assert_eq!(normalize_path(Path::new("//a//b")), PathBuf::from("/a/b"))
+        assert_eq!(normalize_path(Path::new("//a//b")), PathBuf::from("/a/b"));
     }
 
     #[test]
     fn test_normalize_path_parent_dir() {
         assert_eq!(normalize_path(Path::new("a/b/../c")), PathBuf::from("a/c"));
-        assert_eq!(normalize_path(Path::new("../a")), PathBuf::from("../a"))
+        assert_eq!(normalize_path(Path::new("../a")), PathBuf::from("../a"));
     }
 }

@@ -90,7 +90,7 @@ mod tests {
         let mut cursor = Cursor::new(bad_signature);
 
         let result = Header::decode(&mut cursor);
-        assert!(result.is_err())
+        assert!(result.is_err());
     }
 
     #[test]
