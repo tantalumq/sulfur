@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ArchiveError {
+pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("invalid path: {0}")]
@@ -28,6 +28,14 @@ pub enum ArchiveError {
         "invalid file index {index}. the archive contains {file_count} files (valid indices are 0 to {}).", file_count - 1
     )]
     IndexOutOfRange { index: u32, file_count: u32 },
+    #[error("invalid utf-8 in filename: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+    #[error(
+        "too many files in archive (in header): limit is set at {expected}, but found {found} "
+    )]
+    TooManyFiles { expected: u32, found: u32 },
+    #[error("Can't get {0}")]
+    Empty(String),
 }
 
-pub type Result<T> = std::result::Result<T, ArchiveError>;
+pub type Result<T> = std::result::Result<T, Error>;
