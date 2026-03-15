@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
 };
 
 use crate::{Error, HEADER_SIZE, MAX_FILE_COUNT, Result, SIGNATURE, VERSION};
@@ -12,7 +12,7 @@ pub struct Header {
 }
 #[allow(clippy::missing_errors_doc)]
 impl Header {
-    pub fn decode<R: Read>(reader: &mut R) -> Result<Self> {
+    pub fn decode<R: Read + Seek>(reader: &mut R) -> Result<Self> {
         let mut buffer = [0u8; HEADER_SIZE];
         reader.read_exact(&mut buffer)?;
 
@@ -39,9 +39,32 @@ impl Header {
             });
         }
 
-        let file_count = Some(file_count);
+        let index_offset = u64::from_be_bytes(buffer[16..24].try_into()?);
 
-        let index_offset = Some(u64::from_be_bytes(buffer[16..24].try_into()?));
+        let position = reader.stream_position()?;
+        let file_size = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(position))?;
+
+        if index_offset > file_size {
+            return Err(Error::IncorrectIndexOffset(String::from(
+                "index offset is greater than file size",
+            )));
+        }
+
+        if index_offset < HEADER_SIZE as u64 {
+            return Err(Error::IncorrectIndexOffset(String::from(
+                "index offset is less than header size",
+            )));
+        }
+
+        if index_offset + u64::from(file_count) * 8 > file_size {
+            return Err(Error::IncorrectIndexOffset(String::from(
+                "index offset is too big",
+            )));
+        }
+
+        let file_count = Some(file_count);
+        let index_offset = Some(index_offset);
 
         Ok(Self {
             version,
@@ -59,7 +82,6 @@ impl Header {
         buffer[16..24].copy_from_slice(&self.index_offset.unwrap_or_default().to_be_bytes());
 
         writer.write_all(&buffer)?;
-        writer.flush()?;
         Ok(())
     }
 }
@@ -98,6 +120,7 @@ mod tests {
         let mut data = [0u8; HEADER_SIZE];
         data[0..4].copy_from_slice(SIGNATURE);
         data[4..6].copy_from_slice(&VERSION);
+        data[16..24].copy_from_slice(&u64::to_be_bytes(HEADER_SIZE.try_into()?));
 
         let mut cursor = Cursor::new(data);
         let header = Header::decode(&mut cursor)?;

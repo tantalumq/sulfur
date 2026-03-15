@@ -1,15 +1,16 @@
 use std::{
     fmt::Display,
-    fs::{File, create_dir_all},
+    fs::create_dir_all,
     io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
 use flate2::{Crc, write::GzDecoder};
+use tempfile::NamedTempFile;
 
 use crate::{
     ArchiveReader, BUFFER_SIZE, Error, Result,
-    archive::{entry::Entry, header::Header, writer::HasherWriter},
+    archive::{HasherWriter, entry::Entry, header::Header},
     utils::safe_join,
 };
 
@@ -18,20 +19,22 @@ impl<R: Read + Seek> ArchiveReader<R> {
     pub fn open(mut reader: R) -> Result<Self> {
         let header = Header::decode(&mut reader)?;
 
-        reader.seek(SeekFrom::Start(header.index_offset.ok_or(Error::Empty(
-            String::from("Can't get index offset from header"),
-        ))?))?;
+        reader.seek(SeekFrom::Start(
+            header
+                .index_offset
+                .ok_or(Error::Empty(String::from("index offset from header")))?,
+        ))?;
+
         let mut entry_offsets: Vec<u64> = Vec::with_capacity(
             header
                 .file_count
-                .ok_or(Error::Empty(String::from(
-                    "Can't get file count from header",
-                )))?
+                .ok_or(Error::Empty(String::from("file count from header")))?
                 .try_into()?,
         );
-        for _ in 0..header.file_count.ok_or(Error::Empty(String::from(
-            "Can't get file count from header",
-        )))? {
+        for _ in 0..header
+            .file_count
+            .ok_or(Error::Empty(String::from("file count from header")))?
+        {
             let mut offset_bytes = [0u8; 8];
             reader.read_exact(&mut offset_bytes)?;
             entry_offsets.push(u64::from_be_bytes(offset_bytes));
@@ -40,9 +43,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
         let mut entries: Vec<Entry> = Vec::with_capacity(
             header
                 .file_count
-                .ok_or(Error::Empty(String::from(
-                    "Can't get file count from header",
-                )))?
+                .ok_or(Error::Empty(String::from("file count from header")))?
                 .try_into()?,
         );
         for offset in entry_offsets {
@@ -60,13 +61,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
     }
 
     pub fn extract(&mut self, index: u32, target: &Path) -> Result<()> {
-        let entry = self
-            .entries
-            .get(index as usize)
-            .ok_or(Error::IndexOutOfRange {
-                index,
-                file_count: self.entries.len().try_into()?,
-            })?;
+        let entry = self.get_entry(index)?.clone();
 
         let path = safe_join(target, Path::new(&entry.name))?;
 
@@ -74,8 +69,55 @@ impl<R: Read + Seek> ArchiveReader<R> {
             create_dir_all(parents)?;
         }
 
-        let file = File::create(path)?;
-        let mut writer = BufWriter::new(file);
+        let parent = path.parent().unwrap_or(target);
+        let temp_file = NamedTempFile::new_in(parent)?;
+
+        let stats = self.decompress_entry(&entry, &temp_file)?;
+
+        Self::verify_entry(&entry, &stats)?;
+
+        temp_file.persist(&path).map_err(|e| Error::Io(e.error))?;
+
+        Ok(())
+    }
+
+    pub fn extract_all(&mut self, target: &Path) -> Result<()> {
+        for i in 0..self
+            .header
+            .file_count
+            .ok_or(Error::Empty(String::from("file count from header")))?
+        {
+            self.extract(i, target)?;
+        }
+        Ok(())
+    }
+
+    fn get_entry(&self, index: u32) -> Result<&Entry> {
+        self.entries
+            .get(index as usize)
+            .ok_or(Error::IndexOutOfRange {
+                index,
+                file_count: self.entries.len().try_into()?,
+            })
+    }
+
+    fn decompress_entry(
+        &mut self,
+        entry: &Entry,
+        temp_file: &NamedTempFile,
+    ) -> Result<DecompressStats> {
+        let data_start = entry
+            .data_start
+            .ok_or(Error::Empty(String::from("start of data from entry")))?;
+        let compressed_size = entry
+            .compressed_size
+            .ok_or(Error::Empty(String::from("compressed size from entry")))?;
+        let index_offset = self
+            .header
+            .index_offset
+            .ok_or(Error::Empty(String::from("index offset from header")))?;
+
+        let mut writer = BufWriter::new(temp_file);
 
         let mut hasher_writer = HasherWriter::new(&mut writer);
 
@@ -83,23 +125,34 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         let mut decoder = GzDecoder::new(&mut hasher_writer);
 
-        let mut remaining_bytes = entry.compressed_size.ok_or(Error::Empty(String::from(
-            "Can't get compressed size from file entry",
-        )))?;
+        let mut remaining_bytes = compressed_size;
+
+        if data_start
+            .checked_add(compressed_size)
+            .ok_or(Error::IncorrectEntry(String::from(
+                "too big data_start and/or compressed size",
+            )))?
+            > index_offset
+        {
+            return Err(Error::IncorrectEntry(String::from(
+                "start of data + compressed size greater than index offset",
+            )));
+        }
 
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
-        self.reader
-            .seek(SeekFrom::Start(entry.data_start.ok_or(Error::Empty(
-                String::from("Can't get start of data from entry"),
-            ))?))?;
+        self.reader.seek(SeekFrom::Start(data_start))?;
 
         loop {
+            if remaining_bytes == 0 {
+                break;
+            }
+
             let to_read = usize::try_from(remaining_bytes.min(buffer.len() as u64))?;
 
             let bytes = self.reader.read(&mut buffer[..to_read])?;
 
-            if bytes == 0 || remaining_bytes == 0 {
+            if bytes == 0 {
                 break;
             }
 
@@ -114,12 +167,8 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         if remaining_bytes != 0 {
             return Err(Error::SizeMismatch {
-                expected: entry.compressed_size.ok_or(Error::Empty(String::from(
-                    "Can't get compressed size from file entry",
-                )))?,
-                found: entry.compressed_size.ok_or(Error::Empty(String::from(
-                    "Can't get compressed size from file entry",
-                )))? - remaining_bytes,
+                expected: compressed_size,
+                found: compressed_size - remaining_bytes,
             });
         }
 
@@ -127,55 +176,55 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         let source_checksum = hasher_writer.sum();
         let compressed_checksum = compressed_checksum.sum();
+        let source_size = hasher_writer.take_and_reset_bytes();
 
-        if source_checksum
+        writer.flush()?;
+
+        Ok(DecompressStats {
+            source_checksum,
+            compressed_checksum,
+            source_size,
+        })
+    }
+
+    fn verify_entry(entry: &Entry, stats: &DecompressStats) -> Result<()> {
+        if stats.source_checksum
             != entry.source_checksum.ok_or(Error::Empty(String::from(
-                "Can't get source checksum from file entry",
+                "source checksum from file entry",
             )))?
         {
             return Err(Error::ChecksumMismatch {
                 expected: entry.source_checksum.ok_or(Error::Empty(String::from(
-                    "Can't get source checksum from file entry",
+                    "source checksum from file entry",
                 )))?,
-                found: source_checksum,
+                found: stats.source_checksum,
             });
         }
 
-        if compressed_checksum
+        if stats.compressed_checksum
             != entry.compressed_checksum.ok_or(Error::Empty(String::from(
-                "Can't get compressed checksum from file entry",
+                "compressed checksum from file entry",
             )))?
         {
             return Err(Error::ChecksumMismatch {
                 expected: entry.compressed_checksum.ok_or(Error::Empty(String::from(
-                    "Can't get compressed checksum from file entry",
+                    "compressed checksum from file entry",
                 )))?,
-                found: compressed_checksum,
+                found: stats.compressed_checksum,
             });
         }
 
-        let size = hasher_writer.take_and_reset_bytes();
-        if entry.source_size.ok_or(Error::Empty(String::from(
-            "Can't get source size from file entry",
-        )))? != size
+        if entry
+            .source_size
+            .ok_or(Error::Empty(String::from("source size from file entry")))?
+            != stats.source_size
         {
             return Err(Error::SizeMismatch {
-                expected: entry.source_size.ok_or(Error::Empty(String::from(
-                    "Can't get source size from file entry",
-                )))?,
-                found: size,
+                expected: entry
+                    .source_size
+                    .ok_or(Error::Empty(String::from("source size from file entry")))?,
+                found: stats.source_size,
             });
-        }
-
-        writer.flush()?;
-        Ok(())
-    }
-
-    pub fn extract_all(&mut self, target: &Path) -> Result<()> {
-        for i in 0..self.header.file_count.ok_or(Error::Empty(String::from(
-            "Can't get file count from header",
-        )))? {
-            self.extract(i, target)?;
         }
         Ok(())
     }
@@ -241,13 +290,16 @@ impl<W> Display for ArchiveReader<W> {
             "COMPRESSED SIZE",
             "ORIGINAL CHECKSUM",
             "COMPRESSED CHECKSUM",
-            "RATIO"
+            "SAVED"
         )?;
 
         for (index, entry) in self.entries.iter().enumerate() {
             let ratio = match (entry.compressed_size, entry.source_size) {
                 (Some(compressed_size), Some(source_size)) if source_size != 0 => {
-                    format!("{:.1}%", (1 - (compressed_size / source_size)) * 100)
+                    format!(
+                        "{}%",
+                        100u64.saturating_sub(compressed_size * 100 / source_size)
+                    )
                 }
                 _ => "N/A".to_string(),
             };
@@ -275,4 +327,10 @@ impl<W> Display for ArchiveReader<W> {
 
         Ok(())
     }
+}
+
+struct DecompressStats {
+    source_checksum: u32,
+    compressed_checksum: u32,
+    source_size: u64,
 }

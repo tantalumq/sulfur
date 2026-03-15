@@ -1,22 +1,3 @@
-/*
-.slf File structure:
-Signature (4 bytes = '.slf'),
-version (2 bytes = 'xx' ),
-padding (2 bytes),
-file count (4 bytes),
-padding (4 bytes),
-index offset (8 bytes)
- | length of file name (4 bytes),
- | name ('length' bytes),
- | source size of file (8 bytes),
- | source checksum (4 bytes),
- | compressed size of file (8 bytes),
- | compressed checksum (4 bytes),
- | compressed file ('compressed size' bytes),
- ...
-Index array (8 bytes * File count).
-*/
-
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
@@ -25,7 +6,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
-use sulfur::{ArchiveReader, ArchiveWriter /* CompressionType as CoreCompressionType */};
+use sulfur::{ArchiveReader, ArchiveWriter};
 
 fn main() {
     let cli = Cli::parse();
@@ -37,20 +18,16 @@ fn main() {
     }
 }
 
-#[allow(unused_variables)]
 fn run(cli: Cli) -> sulfur::Result<()> {
     match cli.command {
-        Command::Pack {
-            source,
-            output,
-            //compression_type,
-        } => {
+        Command::Pack { source, output } => {
             let target = sulfur::archive_path(&source, &output)?;
 
             let file = File::create(target)?;
             let writer = BufWriter::new(file);
-            let mut archive = ArchiveWriter::new(writer)?;
-            archive.pack(&source)
+            let archive = ArchiveWriter::new(writer)?;
+            archive.pack(&source)?;
+            Ok(())
         }
         Command::Unpack { source, output } => {
             let target = sulfur::extraction_path(&source, &output)?;
@@ -95,8 +72,6 @@ enum Command {
         source: PathBuf,
         #[arg(short, long, default_value = "./")]
         output: PathBuf,
-        //#[arg(short = 'c', long = "compression", value_enum, default_value_t = CliCompressionType::Smart)]
-        //compression_type: CliCompressionType,
     },
 
     Unpack {
@@ -114,30 +89,3 @@ enum Command {
         source: PathBuf,
     },
 }
-
-// #[derive(Clone, Copy, ValueEnum)]
-// pub enum CliCompressionType {
-//     Smart,
-//     Force,
-//     None,
-// }
-
-// impl From<CoreCompressionType> for CliCompressionType {
-//     fn from(value: CoreCompressionType) -> Self {
-//         match value {
-//             CoreCompressionType::Smart => CliCompressionType::Smart,
-//             CoreCompressionType::Force => CliCompressionType::Force,
-//             CoreCompressionType::None => CliCompressionType::None,
-//         }
-//     }
-// }
-
-// impl From<CliCompressionType> for CoreCompressionType {
-//     fn from(value: CliCompressionType) -> Self {
-//         match value {
-//             CliCompressionType::Smart => CoreCompressionType::Smart,
-//             CliCompressionType::Force => CoreCompressionType::Force,
-//             CliCompressionType::None => CoreCompressionType::None,
-//         }
-//     }
-// }

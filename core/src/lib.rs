@@ -25,18 +25,16 @@ pub use archive::{ArchiveReader, ArchiveWriter};
 pub use error::{Error, Result};
 pub use utils::{archive_path, extraction_path};
 
-const HEADER_SIZE: usize = 24;
-const ENTRY_SIZE: usize = 28;
 const SIGNATURE: &[u8] = b".slf";
 const VERSION: [u8; 2] = [1, 0]; // 1.0
+const HEADER_SIZE: usize = 24;
+const ENTRY_SIZE: usize = 28;
+const NAME_LEN_SIZE: u64 = 4;
+const SOURCE_SIZE_SIZE: u64 = 8;
 
 const BUFFER_SIZE: usize = 128 * 1024;
+
 const MAX_FILENAME_SIZE: u32 = 4096;
 const MAX_FILE_COUNT: u32 = 1_000_000;
-
-// #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-// pub enum CompressionType {
-//     Smart,
-//     Force,
-//     None,
-// }
+const MAX_FILE_SOURCE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_FILE_COMPRESSED_SIZE: u64 = 4 * 1024 * 1024 * 1024;

@@ -20,7 +20,7 @@ fn test_pack_and_extract_flow() -> sulfur::Result<()> {
 
     let file = File::create(&archive_path)?;
     let writer = BufWriter::new(file);
-    let mut archive = ArchiveWriter::new(writer)?;
+    let archive = ArchiveWriter::new(writer)?;
     archive.pack(&source_dir)?;
 
     let file = File::open(&archive_path)?;

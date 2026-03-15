@@ -73,7 +73,7 @@ fn normalize_path(path: &Path) -> PathBuf {
                 normalized.push(Component::Prefix(p));
             }
             Component::RootDir => {
-                normalized.clear();
+                normalized.retain(|c| matches!(c, Component::Prefix(_)));
                 normalized.push(Component::RootDir);
             }
             Component::CurDir => {}

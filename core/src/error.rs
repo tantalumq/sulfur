@@ -10,8 +10,6 @@ pub enum Error {
     IncorrectSignature(String),
     #[error("unsupported version: expected {expected}.x, found {found}")]
     UnsupportedVersion { expected: u8, found: u8 },
-    #[error("buffer overflow: {0} is greater than current BufferSize")]
-    BufferOverflow(usize),
     #[error("empty filename")]
     EmptyFilename,
     #[error("checksum mismatch: expected {expected}, found {found}")]
@@ -25,7 +23,8 @@ pub enum Error {
     #[error(transparent)]
     StripPrefix(#[from] std::path::StripPrefixError),
     #[error(
-        "invalid file index {index}. the archive contains {file_count} files (valid indices are 0 to {}).", file_count - 1
+        "invalid file index {index}. the archive contains {file_count} files (valid indices are 0 to {} - 1).",
+        file_count
     )]
     IndexOutOfRange { index: u32, file_count: u32 },
     #[error("invalid utf-8 in filename: {0}")]
@@ -36,6 +35,12 @@ pub enum Error {
     TooManyFiles { expected: u32, found: u32 },
     #[error("Can't get {0}")]
     Empty(String),
+    #[error("Index offset is incorrect: {0}")]
+    IncorrectIndexOffset(String),
+    #[error("Incorrect entry of file: {0}")]
+    IncorrectEntry(String),
+    #[error("Can't retrieve file from source path: {0}")]
+    WalkDir(#[from] walkdir::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
