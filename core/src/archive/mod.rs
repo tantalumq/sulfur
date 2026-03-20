@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use flate2::Crc;
 
 use crate::archive::{entry::Entry, header::Header};
@@ -27,15 +25,4 @@ struct HasherWriter<W> {
     writer: W,
     hasher: Crc,
     bytes: u64,
-}
-
-struct PermissionsGuard<'a> {
-    path: &'a Path,
-    source: std::fs::Permissions,
-}
-
-impl Drop for PermissionsGuard<'_> {
-    fn drop(&mut self) {
-        let _ = std::fs::set_permissions(self.path, self.source.clone());
-    }
 }

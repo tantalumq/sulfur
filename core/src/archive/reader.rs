@@ -19,37 +19,19 @@ impl<R: Read + Seek> ArchiveReader<R> {
     pub fn open(mut reader: R) -> Result<Self> {
         let header = Header::decode(&mut reader)?;
 
-        reader.seek(SeekFrom::Start(
-            header
-                .index_offset
-                .ok_or(Error::Empty(String::from("index offset from header")))?,
-        ))?;
+        reader.seek(SeekFrom::Start(header.index_offset))?;
 
-        let mut entry_offsets: Vec<u64> = Vec::with_capacity(
-            header
-                .file_count
-                .ok_or(Error::Empty(String::from("file count from header")))?
-                .try_into()?,
-        );
-        for _ in 0..header
-            .file_count
-            .ok_or(Error::Empty(String::from("file count from header")))?
-        {
+        let mut entry_offsets: Vec<u64> = Vec::with_capacity(header.file_count.try_into()?);
+        for _ in 0..header.file_count {
             let mut offset_bytes = [0u8; 8];
             reader.read_exact(&mut offset_bytes)?;
             entry_offsets.push(u64::from_be_bytes(offset_bytes));
         }
 
-        let mut entries: Vec<Entry> = Vec::with_capacity(
-            header
-                .file_count
-                .ok_or(Error::Empty(String::from("file count from header")))?
-                .try_into()?,
-        );
+        let mut entries: Vec<Entry> = Vec::with_capacity(header.file_count.try_into()?);
         for offset in entry_offsets {
             reader.seek(SeekFrom::Start(offset))?;
-            let mut entry = Entry::decode(&mut reader)?;
-            entry.offset = Some(offset);
+            let entry = Entry::decode(&mut reader)?;
             entries.push(entry);
         }
 
@@ -82,11 +64,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
     }
 
     pub fn extract_all(&mut self, target: &Path) -> Result<()> {
-        for i in 0..self
-            .header
-            .file_count
-            .ok_or(Error::Empty(String::from("file count from header")))?
-        {
+        for i in 0..self.header.file_count {
             self.extract(i, target)?;
         }
         Ok(())
@@ -106,16 +84,9 @@ impl<R: Read + Seek> ArchiveReader<R> {
         entry: &Entry,
         temp_file: &NamedTempFile,
     ) -> Result<DecompressStats> {
-        let data_start = entry
-            .data_start
-            .ok_or(Error::Empty(String::from("start of data from entry")))?;
-        let compressed_size = entry
-            .compressed_size
-            .ok_or(Error::Empty(String::from("compressed size from entry")))?;
-        let index_offset = self
-            .header
-            .index_offset
-            .ok_or(Error::Empty(String::from("index offset from header")))?;
+        let data_start = entry.data_start;
+        let compressed_size = entry.compressed_size;
+        let index_offset = self.header.index_offset;
 
         let mut writer = BufWriter::new(temp_file);
 
@@ -188,41 +159,23 @@ impl<R: Read + Seek> ArchiveReader<R> {
     }
 
     fn verify_entry(entry: &Entry, stats: &DecompressStats) -> Result<()> {
-        if stats.source_checksum
-            != entry.source_checksum.ok_or(Error::Empty(String::from(
-                "source checksum from file entry",
-            )))?
-        {
+        if stats.source_checksum != entry.source_checksum {
             return Err(Error::ChecksumMismatch {
-                expected: entry.source_checksum.ok_or(Error::Empty(String::from(
-                    "source checksum from file entry",
-                )))?,
+                expected: entry.source_checksum,
                 found: stats.source_checksum,
             });
         }
 
-        if stats.compressed_checksum
-            != entry.compressed_checksum.ok_or(Error::Empty(String::from(
-                "compressed checksum from file entry",
-            )))?
-        {
+        if stats.compressed_checksum != entry.compressed_checksum {
             return Err(Error::ChecksumMismatch {
-                expected: entry.compressed_checksum.ok_or(Error::Empty(String::from(
-                    "compressed checksum from file entry",
-                )))?,
+                expected: entry.compressed_checksum,
                 found: stats.compressed_checksum,
             });
         }
 
-        if entry
-            .source_size
-            .ok_or(Error::Empty(String::from("source size from file entry")))?
-            != stats.source_size
-        {
+        if entry.source_size != stats.source_size {
             return Err(Error::SizeMismatch {
-                expected: entry
-                    .source_size
-                    .ok_or(Error::Empty(String::from("source size from file entry")))?,
+                expected: entry.source_size,
                 found: stats.source_size,
             });
         }
@@ -237,22 +190,14 @@ impl<W> Display for ArchiveReader<W> {
         let original_size_width = self
             .entries
             .iter()
-            .map(|f| {
-                f.source_size
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string())
-                    .len()
-            })
+            .map(|f| f.source_size.to_string().len())
             .max()
             .unwrap_or(0)
             .max("ORIGINAL SIZE".len());
         let compressed_size_width = self
             .entries
             .iter()
-            .map(|f| {
-                f.compressed_size
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string())
-                    .len()
-            })
+            .map(|f| f.compressed_size.to_string().len())
             .max()
             .unwrap_or(0)
             .max("COMPRESSED SIZE".len());
@@ -260,11 +205,7 @@ impl<W> Display for ArchiveReader<W> {
         let original_checksum_width = self
             .entries
             .iter()
-            .map(|f| {
-                f.source_checksum
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string())
-                    .len()
-            })
+            .map(|f| f.source_checksum.to_string().len())
             .max()
             .unwrap_or(0)
             .max("ORIGINAL CHECKSUM".len());
@@ -272,11 +213,7 @@ impl<W> Display for ArchiveReader<W> {
         let compressed_checksum_width = self
             .entries
             .iter()
-            .map(|f| {
-                f.compressed_checksum
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string())
-                    .len()
-            })
+            .map(|f| f.compressed_checksum.to_string().len())
             .max()
             .unwrap_or(0)
             .max("COMPRESSED CHECKSUM".len());
@@ -294,14 +231,13 @@ impl<W> Display for ArchiveReader<W> {
         )?;
 
         for (index, entry) in self.entries.iter().enumerate() {
-            let ratio = match (entry.compressed_size, entry.source_size) {
-                (Some(compressed_size), Some(source_size)) if source_size != 0 => {
-                    format!(
-                        "{}%",
-                        100u64.saturating_sub(compressed_size * 100 / source_size)
-                    )
-                }
-                _ => "N/A".to_string(),
+            let ratio = if entry.source_size != 0 {
+                format!(
+                    "{}%",
+                    100u64.saturating_sub(entry.compressed_size * 100 / entry.source_size)
+                )
+            } else {
+                "N/A".to_string()
             };
 
             writeln!(
@@ -309,18 +245,10 @@ impl<W> Display for ArchiveReader<W> {
                 "{:^index_width$} | {:<name_width$} | {:<original_size_width$} | {:<compressed_size_width$} | {:<original_checksum_width$} | {:<compressed_checksum_width$} | {:<6}",
                 index,
                 entry.name,
-                entry
-                    .source_size
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string()),
-                entry
-                    .compressed_size
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string()),
-                entry
-                    .source_checksum
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string()),
-                entry
-                    .compressed_checksum
-                    .map_or_else(|| "N/A".to_string(), |c| c.to_string()),
+                entry.source_size,
+                entry.compressed_size,
+                entry.source_checksum,
+                entry.compressed_checksum,
                 ratio
             )?;
         }

@@ -41,6 +41,8 @@ pub enum Error {
     IncorrectEntry(String),
     #[error("Can't retrieve file from source path: {0}")]
     WalkDir(#[from] walkdir::Error),
+    #[error("File ({0}) was modified while packing")]
+    FileModified(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

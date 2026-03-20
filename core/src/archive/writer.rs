@@ -1,15 +1,16 @@
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{BufReader, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
+use fd_lock::RwLock;
 use flate2::{Compression, Crc, write::GzEncoder};
 use walkdir::WalkDir;
 
 use crate::{
     ArchiveWriter, BUFFER_SIZE, Error, Result, VERSION,
-    archive::{HasherWriter, PermissionsGuard, entry::Entry, header::Header},
+    archive::{HasherWriter, entry::Entry, header::Header},
 };
 
 #[allow(clippy::missing_errors_doc)]
@@ -17,8 +18,8 @@ impl<W: Write + Seek> ArchiveWriter<W> {
     pub fn new(mut writer: W) -> Result<Self> {
         let header = Header {
             version: VERSION,
-            file_count: None,
-            index_offset: None,
+            file_count: 0,
+            index_offset: 0,
         };
         header.write(&mut writer)?;
 
@@ -41,7 +42,7 @@ impl<W: Write + Seek> ArchiveWriter<W> {
 
         file_paths.sort();
 
-        self.header.file_count = Some(file_paths.len().try_into()?);
+        self.header.file_count = file_paths.len().try_into()?;
         self.writer.seek(SeekFrom::Start(0))?;
         self.header.write(&mut self.writer)?;
 
@@ -60,27 +61,17 @@ impl<W: Write + Seek> ArchiveWriter<W> {
                 path.display(),
             )))?;
             let metadata = path.metadata()?;
-            let source_permissions = metadata.permissions();
-
-            let guard = PermissionsGuard {
-                path: &path,
-                source: source_permissions.clone(),
-            };
-
-            let mut lock_permissions = source_permissions.clone();
-            lock_permissions.set_readonly(true);
-            fs::set_permissions(&path, lock_permissions)?;
-
+            let mtime_source = metadata.modified()?;
             let file_size = metadata.len();
 
             self.entries.push(Entry {
                 name: relative_name,
-                source_size: Some(file_size),
-                compressed_size: None,
-                source_checksum: None,
-                compressed_checksum: None,
-                offset: None,
-                data_start: None,
+                source_size: file_size,
+                compressed_size: 0,
+                source_checksum: 0,
+                compressed_checksum: 0,
+                offset: 0,
+                data_start: 0,
             });
 
             let last_entry = self
@@ -93,7 +84,9 @@ impl<W: Write + Seek> ArchiveWriter<W> {
             let mut hasher_writer = HasherWriter::new(&mut self.writer);
 
             let file = File::open(&path)?;
-            let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
+            let lock = RwLock::new(file);
+            let readable = lock.read()?;
+            let mut reader = BufReader::with_capacity(BUFFER_SIZE, &*readable);
 
             let mut source_checksum = Crc::new();
 
@@ -116,25 +109,27 @@ impl<W: Write + Seek> ArchiveWriter<W> {
             hasher_writer = encoder.finish()?;
             hasher_writer.flush()?;
 
-            last_entry.source_checksum = Some(source_checksum.sum());
-            last_entry.compressed_size = Some(hasher_writer.take_and_reset_bytes());
-            last_entry.compressed_checksum = Some(hasher_writer.sum());
+            last_entry.source_checksum = source_checksum.sum();
+            last_entry.compressed_size = hasher_writer.take_and_reset_bytes();
+            last_entry.compressed_checksum = hasher_writer.sum();
 
             last_entry.update(&mut self.writer)?;
 
-            drop(guard);
+            drop(readable);
+
+            if path.metadata()?.modified()? != mtime_source {
+                return Err(Error::FileModified(path.display().to_string()));
+            }
         }
 
         let index_offset = self.writer.stream_position()?;
 
         for entry in &self.entries {
-            let offset = entry
-                .offset
-                .ok_or(Error::Empty(String::from("get offset from file entry")))?;
+            let offset = entry.offset;
             self.writer.write_all(&offset.to_be_bytes())?;
         }
 
-        self.header.index_offset = Some(index_offset);
+        self.header.index_offset = index_offset;
         self.writer.seek(SeekFrom::Start(0))?;
         self.header.write(&mut self.writer)?;
 

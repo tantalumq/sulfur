@@ -7,8 +7,8 @@ use crate::{Error, HEADER_SIZE, MAX_FILE_COUNT, Result, SIGNATURE, VERSION};
 
 pub struct Header {
     pub version: [u8; 2],
-    pub file_count: Option<u32>,
-    pub index_offset: Option<u64>,
+    pub file_count: u32,
+    pub index_offset: u64,
 }
 #[allow(clippy::missing_errors_doc)]
 impl Header {
@@ -63,9 +63,6 @@ impl Header {
             )));
         }
 
-        let file_count = Some(file_count);
-        let index_offset = Some(index_offset);
-
         Ok(Self {
             version,
             file_count,
@@ -78,8 +75,8 @@ impl Header {
 
         buffer[0..4].copy_from_slice(SIGNATURE);
         buffer[4..6].copy_from_slice(&self.version);
-        buffer[8..12].copy_from_slice(&self.file_count.unwrap_or_default().to_be_bytes());
-        buffer[16..24].copy_from_slice(&self.index_offset.unwrap_or_default().to_be_bytes());
+        buffer[8..12].copy_from_slice(&self.file_count.to_be_bytes());
+        buffer[16..24].copy_from_slice(&self.index_offset.to_be_bytes());
 
         writer.write_all(&buffer)?;
         Ok(())
@@ -91,10 +88,7 @@ impl Display for Header {
         writeln!(
             f,
             "Archive Version {}.{}\nFile count: {}",
-            self.version[0],
-            self.version[1],
-            self.file_count
-                .map_or_else(|| "N/A".to_string(), |c| c.to_string())
+            self.version[0], self.version[1], self.file_count
         )
     }
 }

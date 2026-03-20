@@ -8,32 +8,33 @@ use crate::{
 #[derive(Clone)]
 pub struct Entry {
     pub name: String,
-    pub source_size: Option<u64>,
-    pub compressed_size: Option<u64>,
-    pub source_checksum: Option<u32>,
-    pub compressed_checksum: Option<u32>,
-    pub offset: Option<u64>,
-    pub data_start: Option<u64>,
+    pub source_size: u64,
+    pub compressed_size: u64,
+    pub source_checksum: u32,
+    pub compressed_checksum: u32,
+    pub offset: u64,
+    pub data_start: u64,
 }
 #[allow(clippy::missing_errors_doc)]
 impl Entry {
     pub fn decode<R: Read + Seek>(reader: &mut R) -> Result<Self> {
+        let offset = reader.stream_position()?;
+
         let mut name_len_bytes = [0u8; 4];
 
         reader.read_exact(&mut name_len_bytes)?;
-        let name_len_u32 = u32::from_be_bytes(name_len_bytes);
-        let name_len: usize = name_len_u32.try_into()?;
+        let name_len = u32::from_be_bytes(name_len_bytes);
 
         if name_len == 0 {
             return Err(Error::EmptyFilename);
         }
 
-        if name_len_u32 > MAX_FILENAME_SIZE {
+        if name_len > MAX_FILENAME_SIZE {
             return Err(Error::IncorrectEntry(format!(
                 "file name length is greater than {MAX_FILENAME_SIZE}"
             )));
         }
-        let mut name_bytes = vec![0u8; name_len];
+        let mut name_bytes = vec![0u8; name_len.try_into()?];
 
         reader.read_exact(&mut name_bytes)?;
         let name = String::from_utf8(name_bytes)?;
@@ -58,25 +59,19 @@ impl Entry {
             )));
         }
 
-        let data_start = Some(reader.stream_position()?);
-        let source_size = Some(source_size);
-        let source_checksum = Some(u32::from_be_bytes(metadata_bytes[8..12].try_into()?));
-        let compressed_size = Some(compressed_size);
-        let compressed_checksum = Some(u32::from_be_bytes(metadata_bytes[20..24].try_into()?));
-
         Ok(Self {
             name,
             source_size,
-            source_checksum,
+            source_checksum: u32::from_be_bytes(metadata_bytes[8..12].try_into()?),
             compressed_size,
-            compressed_checksum,
-            offset: None,
-            data_start,
+            compressed_checksum: u32::from_be_bytes(metadata_bytes[20..24].try_into()?),
+            offset,
+            data_start: reader.stream_position()?,
         })
     }
 
     pub fn write<W: Write + Seek>(&mut self, mut writer: W) -> Result<()> {
-        self.offset = Some(writer.stream_position()?);
+        self.offset = writer.stream_position()?;
 
         let name_len = self.name.len();
         let name_len_u32: u32 = self.name.len().try_into()?;
@@ -94,59 +89,29 @@ impl Entry {
 
         buffer[0..4].copy_from_slice(&name_len_u32.to_be_bytes());
         buffer[4..name_len + 4].copy_from_slice(self.name.as_bytes());
-        buffer[name_len + 4..name_len + 12]
-            .copy_from_slice(&self.source_size.unwrap_or_default().to_be_bytes());
-        buffer[name_len + 12..name_len + 16]
-            .copy_from_slice(&self.source_checksum.unwrap_or_default().to_be_bytes());
-        buffer[name_len + 16..name_len + 24]
-            .copy_from_slice(&self.compressed_size.unwrap_or_default().to_be_bytes());
+        buffer[name_len + 4..name_len + 12].copy_from_slice(&self.source_size.to_be_bytes());
+        buffer[name_len + 12..name_len + 16].copy_from_slice(&self.source_checksum.to_be_bytes());
+        buffer[name_len + 16..name_len + 24].copy_from_slice(&self.compressed_size.to_be_bytes());
         buffer[name_len + 24..name_len + 28]
-            .copy_from_slice(&self.compressed_checksum.unwrap_or_default().to_be_bytes());
+            .copy_from_slice(&self.compressed_checksum.to_be_bytes());
 
         writer.write_all(&buffer)?;
 
-        self.data_start = Some(writer.stream_position()?);
+        self.data_start = writer.stream_position()?;
 
         Ok(())
     }
 
     pub fn update<W: Write + Seek>(&self, mut writer: W) -> Result<()> {
         let name_len: u64 = self.name.len().try_into()?;
-
-        let empty_fields_offset = self
-            .offset
-            .ok_or(Error::Empty(String::from("get offset from file entry")))?
-            + NAME_LEN_SIZE
-            + name_len
-            + SOURCE_SIZE_SIZE;
+        let empty_fields_offset = self.offset + NAME_LEN_SIZE + name_len + SOURCE_SIZE_SIZE;
 
         writer.seek(SeekFrom::Start(empty_fields_offset))?;
 
         let mut buffer = [0u8; 16];
-        buffer[0..4].copy_from_slice(
-            &self
-                .source_checksum
-                .ok_or(Error::Empty(String::from(
-                    "get source checksum from file entry",
-                )))?
-                .to_be_bytes(),
-        );
-        buffer[4..12].copy_from_slice(
-            &self
-                .compressed_size
-                .ok_or(Error::Empty(String::from(
-                    "get compressed size from file entry",
-                )))?
-                .to_be_bytes(),
-        );
-        buffer[12..16].copy_from_slice(
-            &self
-                .compressed_checksum
-                .ok_or(Error::Empty(String::from(
-                    "get compressed checksum from file entry",
-                )))?
-                .to_be_bytes(),
-        );
+        buffer[0..4].copy_from_slice(&self.source_checksum.to_be_bytes());
+        buffer[4..12].copy_from_slice(&self.compressed_size.to_be_bytes());
+        buffer[12..16].copy_from_slice(&self.compressed_checksum.to_be_bytes());
         writer.write_all(&buffer)?;
 
         writer.seek(SeekFrom::End(0))?;

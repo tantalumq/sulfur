@@ -8,6 +8,7 @@ flate2 = { version = "1.1.9", features = ["zlib-ng"], default-features = false }
 thiserror = "2.0.18"
 walkdir = "2.5.0"
 tempfile = "3.27.0"
+fd-lock = "4.0.4"
 
 
 [dev-dependencies]

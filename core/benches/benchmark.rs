@@ -14,7 +14,7 @@ pub fn benchmark_single_file_pack_real(c: &mut Criterion) {
 
     let mut benchmark_group = c.benchmark_group("sulfur_bench");
 
-    benchmark_group.sample_size(25);
+    benchmark_group.sample_size(20);
     benchmark_group.measurement_time(Duration::from_secs(30));
 
     benchmark_group.bench_function("single file pack (100 MiB)", |b| {
