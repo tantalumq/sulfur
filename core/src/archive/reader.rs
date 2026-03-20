@@ -44,23 +44,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
     pub fn extract(&mut self, index: u32, target: &Path) -> Result<()> {
         let entry = self.get_entry(index)?.clone();
-
-        let path = safe_join(target, Path::new(&entry.name))?;
-
-        if let Some(parents) = path.parent() {
-            create_dir_all(parents)?;
-        }
-
-        let parent = path.parent().unwrap_or(target);
-        let temp_file = NamedTempFile::new_in(parent)?;
-
-        let stats = self.decompress_entry(&entry, &temp_file)?;
-
-        Self::verify_entry(&entry, &stats)?;
-
-        temp_file.persist(&path).map_err(|e| Error::Io(e.error))?;
-
-        Ok(())
+        Self::unpack_entry(&mut self.reader, &entry, self.header.index_offset, target)
     }
 
     pub fn extract_all(&mut self, target: &Path) -> Result<()> {
@@ -79,15 +63,45 @@ impl<R: Read + Seek> ArchiveReader<R> {
             })
     }
 
-    fn decompress_entry(
-        &mut self,
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+    pub fn index_offset(&self) -> u64 {
+        self.header.index_offset
+    }
+}
+
+impl<W> ArchiveReader<W> {
+    pub fn unpack_entry<T: Read + Seek>(
+        reader: &mut T,
         entry: &Entry,
+        index_offset: u64,
+        target: &Path,
+    ) -> Result<()> {
+        let path = safe_join(target, Path::new(&entry.name))?;
+
+        if let Some(parents) = path.parent() {
+            create_dir_all(parents)?;
+        }
+
+        let parent = path.parent().unwrap_or(target);
+        let temp_file = NamedTempFile::new_in(parent)?;
+
+        let stats = Self::decompress_entry(reader, entry, index_offset, &temp_file)?;
+
+        Self::verify_entry(entry, &stats)?;
+
+        temp_file.persist(&path).map_err(|e| Error::Io(e.error))?;
+
+        Ok(())
+    }
+
+    fn decompress_entry<T: Read + Seek>(
+        reader: &mut T,
+        entry: &Entry,
+        index_offset: u64,
         temp_file: &NamedTempFile,
     ) -> Result<DecompressStats> {
-        let data_start = entry.data_start;
-        let compressed_size = entry.compressed_size;
-        let index_offset = self.header.index_offset;
-
         let mut writer = BufWriter::new(temp_file);
 
         let mut hasher_writer = HasherWriter::new(&mut writer);
@@ -96,10 +110,11 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         let mut decoder = GzDecoder::new(&mut hasher_writer);
 
-        let mut remaining_bytes = compressed_size;
+        let mut remaining_bytes = entry.compressed_size;
 
-        if data_start
-            .checked_add(compressed_size)
+        if entry
+            .data_start
+            .checked_add(entry.compressed_size)
             .ok_or(Error::IncorrectEntry(String::from(
                 "too big data_start and/or compressed size",
             )))?
@@ -112,7 +127,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
-        self.reader.seek(SeekFrom::Start(data_start))?;
+        reader.seek(SeekFrom::Start(entry.data_start))?;
 
         loop {
             if remaining_bytes == 0 {
@@ -121,7 +136,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
             let to_read = usize::try_from(remaining_bytes.min(buffer.len() as u64))?;
 
-            let bytes = self.reader.read(&mut buffer[..to_read])?;
+            let bytes = reader.read(&mut buffer[..to_read])?;
 
             if bytes == 0 {
                 break;
@@ -138,8 +153,8 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         if remaining_bytes != 0 {
             return Err(Error::SizeMismatch {
-                expected: compressed_size,
-                found: compressed_size - remaining_bytes,
+                expected: entry.compressed_size,
+                found: entry.compressed_size - remaining_bytes,
             });
         }
 

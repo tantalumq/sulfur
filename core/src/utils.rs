@@ -1,5 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
+use walkdir::WalkDir;
+
 use crate::{Error, Result};
 
 #[allow(clippy::missing_errors_doc)]
@@ -124,6 +126,33 @@ pub fn safe_join(base: &Path, untrusted: &Path) -> Result<PathBuf> {
     let result = base.join(sanitized);
 
     Ok(result)
+}
+
+pub fn collect_files(source: &Path) -> Result<Vec<(PathBuf, String)>> {
+    let mut file_paths = Vec::new();
+
+    for entry in WalkDir::new(source) {
+        let entry = entry?;
+        let path = entry.into_path();
+
+        let relative_name = if source.is_file() {
+            path.file_name()
+        } else {
+            path.strip_prefix(source).ok().map(Path::as_os_str)
+        }
+        .and_then(|s| s.to_str())
+        .map(|s| s.replace('\\', "/"))
+        .ok_or(Error::Path(format!(
+            "can't get relative file name from {}",
+            path.display(),
+        )))?;
+
+        if path.is_file() {
+            file_paths.push((path, relative_name));
+        }
+    }
+
+    Ok(file_paths)
 }
 
 #[cfg(test)]
