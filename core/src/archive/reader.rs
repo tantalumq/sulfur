@@ -102,7 +102,7 @@ impl<D> ArchiveReader<D> {
         let path = safe_join(target, Path::new(&entry.name))?;
 
         for ancestors in path.ancestors() {
-            if ancestors.exists() {
+            if ancestors.exists() && ancestors.starts_with(target) && ancestors != target {
                 let metadata = ancestors.symlink_metadata()?;
                 if metadata.is_symlink() {
                     return Err(Error::Path(format!(
