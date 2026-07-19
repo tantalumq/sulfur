@@ -43,12 +43,27 @@ pub fn archive_path(source: &Path, target: &Path) -> Result<PathBuf> {
             source.display()
         )));
     }
-    Ok(if target.extension().is_some_and(|ex| ex == "slf") {
+
+    let target = if target == Path::new(".") {
+        archive_name(&source)?
+    } else {
+        target
+    };
+
+    let resolved_path = if target.extension().is_some_and(|ex| ex == "slf") {
         target
     } else {
-        let archive_name = archive_name(&source)?;
-        target.join(archive_name).with_extension("slf")
-    })
+        target.with_extension("slf")
+    };
+
+    if resolved_path.is_dir() {
+        return Err(Error::Path(format!(
+            "target path is an existing directory: {}",
+            resolved_path.display()
+        )));
+    }
+
+    Ok(resolved_path)
 }
 
 fn archive_name(source: &Path) -> Result<PathBuf> {
@@ -91,7 +106,12 @@ fn normalize_path(path: &Path) -> PathBuf {
             Component::Normal(_) => normalized.push(component),
         }
     }
-    normalized.iter().collect()
+
+    if normalized.is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized.iter().collect()
+    }
 }
 
 pub fn safe_join(base: &Path, untrusted: &Path) -> Result<PathBuf> {
@@ -135,6 +155,10 @@ pub fn collect_files(source: &Path) -> Result<Vec<(PathBuf, String)>> {
         let entry = entry?;
         let path = entry.into_path();
 
+        if path.is_symlink() {
+            continue;
+        }
+
         let relative_name = if source.is_file() {
             path.file_name()
         } else {
@@ -158,7 +182,62 @@ pub fn collect_files(source: &Path) -> Result<Vec<(PathBuf, String)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::{fs, path::Path};
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_archive_path_to_file() -> Result<()> {
+        let dir = tempdir()?;
+        let source = dir.path().join("a");
+        fs::File::create(&source)?;
+
+        let target = dir.path().join("c.slf");
+
+        assert_eq!(&archive_path(&source, &target)?, &dir.path().join("c.slf"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_archive_path_to_file_with_dir() -> Result<()> {
+        let dir = tempdir()?;
+        let source = dir.path().join("a");
+        fs::File::create(&source)?;
+
+        let target = dir.path().join("c/b");
+
+        assert_eq!(
+            &archive_path(&source, &target)?,
+            &dir.path().join("c/b.slf")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_extraction_path_from_archive() -> Result<()> {
+        let dir = tempdir()?;
+        let source = dir.path().join("a.slf");
+        fs::File::create(&source)?;
+
+        let target = dir.path().join("b");
+
+        assert_eq!(
+            &extraction_path(&source, &target)?,
+            &dir.path().join("b/a/")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_extraction_path_from_archive_invalid_extension() -> Result<()> {
+        let dir = tempdir()?;
+        let source = dir.path().join("a.notslf");
+        fs::File::create(&source)?;
+
+        let target = dir.path().join("b");
+
+        assert!(extraction_path(&source, &target).is_err());
+        Ok(())
+    }
 
     #[test]
     fn test_safe_join_path_traversal() {

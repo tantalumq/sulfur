@@ -13,6 +13,7 @@ use crate::{
     archive::{CompressedFile, HasherWriter, entry::Entry},
 };
 impl CompressedFile {
+    #[allow(clippy::missing_errors_doc)]
     pub fn create(path: &Path, relative_name: String) -> Result<Self> {
         let metadata = path.metadata()?;
         let mtime_source = metadata.modified()?;

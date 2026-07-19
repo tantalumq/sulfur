@@ -1,7 +1,8 @@
 use std::{
+    collections::HashMap,
     fmt::Display,
     fs::create_dir_all,
-    io::{BufWriter, Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -9,7 +10,7 @@ use flate2::{Crc, write::GzDecoder};
 use tempfile::NamedTempFile;
 
 use crate::{
-    ArchiveReader, BUFFER_SIZE, Error, Result,
+    ArchiveReader, BUFFER_SIZE, Error, MAX_FILE_SOURCE_SIZE, Result,
     archive::{HasherWriter, entry::Entry, header::Header},
     utils::safe_join,
 };
@@ -21,14 +22,14 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         reader.seek(SeekFrom::Start(header.index_offset))?;
 
-        let mut entry_offsets: Vec<u64> = Vec::with_capacity(header.file_count.try_into()?);
+        let mut entry_offsets: Vec<u64> = Vec::new();
         for _ in 0..header.file_count {
             let mut offset_bytes = [0u8; 8];
             reader.read_exact(&mut offset_bytes)?;
             entry_offsets.push(u64::from_be_bytes(offset_bytes));
         }
 
-        let mut entries: Vec<Entry> = Vec::with_capacity(header.file_count.try_into()?);
+        let mut entries: Vec<Entry> = Vec::new();
         for offset in entry_offsets {
             reader.seek(SeekFrom::Start(offset))?;
             let entry = Entry::decode(&mut reader)?;
@@ -63,6 +64,25 @@ impl<R: Read + Seek> ArchiveReader<R> {
             })
     }
 
+    pub fn get_entries_map(&self) -> Result<HashMap<&str, u32>> {
+        let mut entries_map: HashMap<&str, u32> = HashMap::new();
+
+        for index in 0..self.entries().len() {
+            let entry_name = &self
+                .entries
+                .get(index)
+                .ok_or(Error::IndexOutOfRange {
+                    index: u32::try_from(index)?,
+                    file_count: self.entries.len().try_into()?,
+                })?
+                .name;
+
+            entries_map.insert(entry_name, u32::try_from(index)?);
+        }
+
+        Ok(entries_map)
+    }
+
     pub fn entries(&self) -> &[Entry] {
         &self.entries
     }
@@ -71,7 +91,8 @@ impl<R: Read + Seek> ArchiveReader<R> {
     }
 }
 
-impl<W> ArchiveReader<W> {
+impl<D> ArchiveReader<D> {
+    #[allow(clippy::missing_errors_doc)]
     pub fn unpack_entry<T: Read + Seek>(
         reader: &mut T,
         entry: &Entry,
@@ -79,6 +100,18 @@ impl<W> ArchiveReader<W> {
         target: &Path,
     ) -> Result<()> {
         let path = safe_join(target, Path::new(&entry.name))?;
+
+        for ancestors in path.ancestors() {
+            if ancestors.exists() {
+                let metadata = ancestors.symlink_metadata()?;
+                if metadata.is_symlink() {
+                    return Err(Error::Path(format!(
+                        "symlink detected at destination path: {}",
+                        ancestors.display()
+                    )));
+                }
+            }
+        }
 
         if let Some(parents) = path.parent() {
             create_dir_all(parents)?;
@@ -96,14 +129,12 @@ impl<W> ArchiveReader<W> {
         Ok(())
     }
 
-    fn decompress_entry<T: Read + Seek>(
+    fn decompress_entry<T: Read + Seek, W: Write>(
         reader: &mut T,
         entry: &Entry,
         index_offset: u64,
-        temp_file: &NamedTempFile,
+        mut writer: W,
     ) -> Result<DecompressStats> {
-        let mut writer = BufWriter::new(temp_file);
-
         let mut hasher_writer = HasherWriter::new(&mut writer);
 
         let mut compressed_checksum = Crc::new();
@@ -141,12 +172,20 @@ impl<W> ArchiveReader<W> {
             if bytes == 0 {
                 break;
             }
-
             let chunk = &buffer[..bytes];
 
             compressed_checksum.update(chunk);
 
             decoder.write_all(chunk)?;
+
+            let decoded_bytes = decoder.get_ref().bytes;
+
+            if decoded_bytes > MAX_FILE_SOURCE_SIZE || decoded_bytes > entry.source_size {
+                return Err(Error::SizeMismatch {
+                    expected: entry.source_size,
+                    found: decoded_bytes,
+                });
+            }
 
             remaining_bytes -= bytes as u64;
         }
@@ -198,7 +237,7 @@ impl<W> ArchiveReader<W> {
     }
 }
 
-impl<W> Display for ArchiveReader<W> {
+impl<D> Display for ArchiveReader<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let index_width = self.entries.len().to_string().len().max("INDEX".len());
         let name_width = self.entries.iter().map(|f| f.name.len()).max().unwrap_or(0);
@@ -246,10 +285,19 @@ impl<W> Display for ArchiveReader<W> {
         )?;
 
         for (index, entry) in self.entries.iter().enumerate() {
+            entry
+                .compressed_size
+                .checked_mul(100)
+                .expect("Compressed size of file is too big");
+
             let ratio = if entry.source_size != 0 {
                 format!(
                     "{}%",
-                    100u64.saturating_sub(entry.compressed_size * 100 / entry.source_size)
+                    100u64.saturating_sub(
+                        (entry.compressed_size * 100)
+                            .checked_div(entry.source_size)
+                            .expect("Can't divide by source size")
+                    )
                 )
             } else {
                 "N/A".to_string()

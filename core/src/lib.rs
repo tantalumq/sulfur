@@ -18,6 +18,7 @@ Index array (8 bytes * File count).
 */
 
 pub mod archive;
+
 mod error;
 mod utils;
 
@@ -29,8 +30,8 @@ const SIGNATURE: &[u8] = b".slf";
 const VERSION: [u8; 2] = [1, 0]; // 1.0
 const HEADER_SIZE: usize = 24;
 const ENTRY_SIZE: usize = 28;
-const NAME_LEN_SIZE: u64 = 4;
-const SOURCE_SIZE_SIZE: u64 = 8;
+// const NAME_LEN_SIZE: u64 = 4;
+// const SOURCE_SIZE_SIZE: u64 = 8;
 
 const BUFFER_SIZE: usize = 128 * 1024;
 

@@ -1,8 +1,7 @@
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, Write};
 
 use crate::{
-    ENTRY_SIZE, Error, MAX_FILE_COMPRESSED_SIZE, MAX_FILE_SOURCE_SIZE, MAX_FILENAME_SIZE,
-    NAME_LEN_SIZE, Result, SOURCE_SIZE_SIZE,
+    ENTRY_SIZE, Error, MAX_FILE_COMPRESSED_SIZE, MAX_FILE_SOURCE_SIZE, MAX_FILENAME_SIZE, Result,
 };
 
 #[derive(Clone)]
@@ -102,22 +101,22 @@ impl Entry {
         Ok(())
     }
 
-    pub fn update<W: Write + Seek>(&self, mut writer: W) -> Result<()> {
-        let name_len: u64 = self.name.len().try_into()?;
-        let empty_fields_offset = self.offset + NAME_LEN_SIZE + name_len + SOURCE_SIZE_SIZE;
+    // pub fn update<W: Write + Seek>(&self, mut writer: W) -> Result<()> {
+    //     let name_len: u64 = self.name.len().try_into()?;
+    //     let empty_fields_offset = self.offset + NAME_LEN_SIZE + name_len + SOURCE_SIZE_SIZE;
 
-        writer.seek(SeekFrom::Start(empty_fields_offset))?;
+    //     writer.seek(SeekFrom::Start(empty_fields_offset))?;
 
-        let mut buffer = [0u8; 16];
-        buffer[0..4].copy_from_slice(&self.source_checksum.to_be_bytes());
-        buffer[4..12].copy_from_slice(&self.compressed_size.to_be_bytes());
-        buffer[12..16].copy_from_slice(&self.compressed_checksum.to_be_bytes());
-        writer.write_all(&buffer)?;
+    //     let mut buffer = [0u8; 16];
+    //     buffer[0..4].copy_from_slice(&self.source_checksum.to_be_bytes());
+    //     buffer[4..12].copy_from_slice(&self.compressed_size.to_be_bytes());
+    //     buffer[12..16].copy_from_slice(&self.compressed_checksum.to_be_bytes());
+    //     writer.write_all(&buffer)?;
 
-        writer.seek(SeekFrom::End(0))?;
+    //     writer.seek(SeekFrom::End(0))?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
 
 #[cfg(test)]

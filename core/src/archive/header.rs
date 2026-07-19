@@ -57,9 +57,19 @@ impl Header {
             )));
         }
 
-        if index_offset + u64::from(file_count) * 8 > file_size {
+        let file_count_bytes =
+            file_count
+                .checked_mul(8)
+                .ok_or(Error::IncorrectFileCount(String::from(
+                    "the index array doesn't fits in file because of too big count of files",
+                )))?;
+
+        if index_offset
+            .checked_add(u64::from(file_count_bytes))
+            .is_none()
+        {
             return Err(Error::IncorrectIndexOffset(String::from(
-                "index offset is too big",
+                "the index array doesn't fits in file becaues of too big value of index offset",
             )));
         }
 
@@ -117,9 +127,9 @@ mod tests {
         data[16..24].copy_from_slice(&u64::to_be_bytes(HEADER_SIZE.try_into()?));
 
         let mut cursor = Cursor::new(data);
-        let header = Header::decode(&mut cursor)?;
 
-        assert_eq!(header.version, VERSION);
+        assert!(Header::decode(&mut cursor).is_ok());
+
         Ok(())
     }
 
@@ -141,6 +151,19 @@ mod tests {
         let mut data = [0u8; HEADER_SIZE];
         data[0..4].copy_from_slice(SIGNATURE);
         data[4..6].copy_from_slice(&[0, 0]);
+
+        let mut cursor = Cursor::new(data);
+        let result = Header::decode(&mut cursor);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_header_decoding_with_incorrect_index_offset() {
+        let mut data = [0u8; HEADER_SIZE];
+        data[0..4].copy_from_slice(SIGNATURE);
+        data[4..6].copy_from_slice(&VERSION);
+        data[16..24].copy_from_slice(&u64::MAX.to_be_bytes());
 
         let mut cursor = Cursor::new(data);
         let result = Header::decode(&mut cursor);

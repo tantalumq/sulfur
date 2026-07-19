@@ -39,6 +39,10 @@ pub enum Error {
     IncorrectIndexOffset(String),
     #[error("Incorrect entry of file: {0}")]
     IncorrectEntry(String),
+    #[error("Incorrect file count: {0}")]
+    IncorrectFileCount(String),
+    #[error("Incorrect file name: {0}")]
+    IncorrectFileName(String),
     #[error("Can't retrieve file from source path: {0}")]
     WalkDir(#[from] walkdir::Error),
     #[error("File ({0}) was modified while packing")]

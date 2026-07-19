@@ -6,7 +6,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
-use sulfur::{ArchiveReader, ArchiveWriter};
+use sulfur::{ArchiveReader, ArchiveWriter, Error};
 
 fn main() {
     let cli = Cli::parse();
@@ -23,6 +23,10 @@ fn run(cli: Cli) -> sulfur::Result<()> {
         Command::Pack { source, output } => {
             let target = sulfur::archive_path(&source, &output)?;
 
+            if let Some(parents) = target.parent() {
+                std::fs::create_dir_all(parents)?;
+            }
+
             let file = File::create(target)?;
             let writer = BufWriter::new(file);
             let archive = ArchiveWriter::new(writer)?;
@@ -38,7 +42,7 @@ fn run(cli: Cli) -> sulfur::Result<()> {
             archive.extract_all(&target)
         }
         Command::Get {
-            index,
+            name,
             source,
             output,
         } => {
@@ -47,6 +51,15 @@ fn run(cli: Cli) -> sulfur::Result<()> {
             let file = File::open(source)?;
             let reader = BufReader::new(file);
             let mut archive = ArchiveReader::open(reader)?;
+
+            let archive_map = archive.get_entries_map()?;
+            let index = archive_map
+                .get(name.as_str())
+                .copied()
+                .ok_or(Error::IncorrectFileName(format!(
+                    "can't found {name} in archive"
+                )))?;
+
             archive.extract(index, &target)
         }
         Command::Info { source } => {
@@ -81,7 +94,7 @@ enum Command {
     },
     Get {
         source: PathBuf,
-        index: u32,
+        name: String,
         #[arg(short = 'o', long, default_value = "./")]
         output: PathBuf,
     },
