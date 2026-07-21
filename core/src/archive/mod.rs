@@ -1,5 +1,5 @@
 use flate2::Crc;
-use tempfile::NamedTempFile;
+use tempfile::TempPath;
 
 use crate::archive::{entry::Entry, header::Header};
 
@@ -12,8 +12,9 @@ pub(crate) mod compressed_file;
 pub(crate) mod hasher_writer;
 
 pub struct CompressedFile {
+    id: u32,
     entry: Entry,
-    content: NamedTempFile,
+    content_path: TempPath,
 }
 
 pub struct ArchiveWriter<W> {

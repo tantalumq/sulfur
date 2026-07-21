@@ -4,6 +4,10 @@ use thiserror::Error;
 pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("respond error: {0}")]
+    Recv(#[from] std::sync::mpsc::RecvError),
+    #[error("worker thread panicked")]
+    ThreadPanic,
     #[error("invalid path: {0}")]
     Path(String),
     #[error("invalid file signature: {0}")]

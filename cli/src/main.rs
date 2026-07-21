@@ -36,10 +36,10 @@ fn run(cli: Cli) -> sulfur::Result<()> {
         Command::Unpack { source, output } => {
             let target = sulfur::extraction_path(&source, &output)?;
 
-            let file = File::open(source)?;
+            let file = File::open(&source)?;
             let reader = BufReader::new(file);
             let mut archive = ArchiveReader::open(reader)?;
-            archive.extract_all(&target)
+            archive.extract_all(&source, &target)
         }
         Command::Get {
             name,

@@ -1,9 +1,11 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    fs::create_dir_all,
+    fs::{File, create_dir_all},
     io::{Read, Seek, SeekFrom, Write},
+    num::NonZero,
     path::Path,
+    thread,
 };
 
 use flate2::{Crc, write::GzDecoder};
@@ -48,10 +50,38 @@ impl<R: Read + Seek> ArchiveReader<R> {
         Self::unpack_entry(&mut self.reader, &entry, self.header.index_offset, target)
     }
 
-    pub fn extract_all(&mut self, target: &Path) -> Result<()> {
-        for i in 0..self.header.file_count {
-            self.extract(i, target)?;
+    pub fn extract_all(&mut self, source: &Path, target: &Path) -> Result<()> {
+        if self.entries().is_empty() {
+            return Ok(());
         }
+
+        let threads_num = std::thread::available_parallelism().map_or(4, NonZero::get);
+
+        let index_offset = self.index_offset();
+
+        thread::scope(|s| -> Result<()> {
+            let chunk_size = self.header.file_count.div_ceil(threads_num.try_into()?);
+            let chunks = self.entries().chunks(chunk_size.try_into()?);
+
+            let mut handles = Vec::new();
+
+            for chunk in chunks {
+                let handle = s.spawn(move || -> Result<()> {
+                    let mut file = File::open(source)?;
+                    for entry in chunk {
+                        Self::unpack_entry(&mut file, entry, index_offset, target)?;
+                    }
+                    Ok(())
+                });
+
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                handle.join().map_err(|_| Error::ThreadPanic)??;
+            }
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -72,12 +102,12 @@ impl<R: Read + Seek> ArchiveReader<R> {
                 .entries
                 .get(index)
                 .ok_or(Error::IndexOutOfRange {
-                    index: u32::try_from(index)?,
+                    index: index.try_into()?,
                     file_count: self.entries.len().try_into()?,
                 })?
                 .name;
 
-            entries_map.insert(entry_name, u32::try_from(index)?);
+            entries_map.insert(entry_name, index.try_into()?);
         }
 
         Ok(entries_map)

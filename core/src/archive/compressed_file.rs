@@ -14,7 +14,7 @@ use crate::{
 };
 impl CompressedFile {
     #[allow(clippy::missing_errors_doc)]
-    pub fn create(path: &Path, relative_name: String) -> Result<Self> {
+    pub fn create(id: u32, path: &Path, relative_name: String) -> Result<Self> {
         let metadata = path.metadata()?;
         let mtime_source = metadata.modified()?;
         let file_size = metadata.len();
@@ -66,8 +66,9 @@ impl CompressedFile {
         };
 
         Ok(Self {
+            id,
             entry,
-            content: temp,
+            content_path: temp.into_temp_path(),
         })
     }
 }

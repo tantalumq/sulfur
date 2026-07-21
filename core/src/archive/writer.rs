@@ -1,10 +1,15 @@
 use std::{
+    collections::BTreeMap,
+    fs::File,
     io::{BufReader, Seek, SeekFrom, Write},
-    path::Path,
+    num::NonZero,
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
 };
 
 use crate::{
-    ArchiveWriter, Result, VERSION,
+    ArchiveWriter, HEADER_SIZE, Result, VERSION,
     archive::{CompressedFile, header::Header},
     utils::collect_files,
 };
@@ -25,30 +30,24 @@ impl<W: Write + Seek> ArchiveWriter<W> {
         })
     }
 
-    pub fn pack(self, source: &Path) -> Result<W> {
+    pub fn pack(mut self, source: &Path) -> Result<W> {
         let mut file_paths = collect_files(source)?;
         file_paths.sort();
 
-        let compressed_files = file_paths
-            .iter()
-            .map(|(path, name)| CompressedFile::create(path, name.clone()))
-            .collect::<Result<Vec<CompressedFile>>>()?;
+        if file_paths.is_empty() {
+            self.header.file_count = 0;
+            self.header.index_offset = 24;
 
-        self.assemble(compressed_files)
-    }
-    fn assemble(mut self, compressed_files: Vec<CompressedFile>) -> Result<W> {
-        self.header.file_count = compressed_files.len().try_into()?;
-        self.writer.seek(SeekFrom::Start(0))?;
-        self.header.write(&mut self.writer)?;
+            self.writer.seek(SeekFrom::Start(0))?;
+            self.header.write(&mut self.writer)?;
+            self.writer.flush()?;
 
-        for mut file in compressed_files {
-            file.entry.write(&mut self.writer)?;
-
-            let mut reader = BufReader::new(file.content.reopen()?);
-            std::io::copy(&mut reader, &mut self.writer)?;
-
-            self.entries.push(file.entry);
+            return Ok(self.writer);
         }
+
+        self.write_files(file_paths)?;
+
+        self.header.file_count = self.entries.len().try_into()?;
 
         let index_offset = self.writer.stream_position()?;
 
@@ -64,5 +63,63 @@ impl<W: Write + Seek> ArchiveWriter<W> {
         self.writer.flush()?;
 
         Ok(self.writer)
+    }
+
+    fn write_files(&mut self, file_paths: Vec<(PathBuf, String)>) -> Result<()> {
+        let indexed_files: Vec<((PathBuf, String), u32)> =
+            file_paths.into_iter().zip(0u32..).collect();
+
+        let threads_num = std::thread::available_parallelism().map_or(4, NonZero::get);
+
+        let (tx, rx) = mpsc::sync_channel::<Result<CompressedFile>>(threads_num);
+
+        let mut pending = BTreeMap::new();
+        let mut next_id_to_write = 0;
+
+        self.writer.seek(SeekFrom::Start(HEADER_SIZE.try_into()?))?;
+
+        thread::scope(|s| -> Result<()> {
+            let chunk_size = indexed_files.len().div_ceil(threads_num);
+
+            let chunks = indexed_files.chunks(chunk_size);
+
+            for chunk in chunks {
+                let tx = tx.clone();
+                s.spawn(move || -> Result<()> {
+                    for ((path, name), id) in chunk {
+                        if tx
+                            .send(CompressedFile::create(*id, path, name.clone()))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(())
+                });
+            }
+
+            drop(tx);
+
+            for respond in rx {
+                let compressed_file = respond?;
+                pending.insert(compressed_file.id, compressed_file);
+
+                while let Some(mut file) = pending.remove(&next_id_to_write) {
+                    file.entry.write(&mut self.writer)?;
+
+                    let content_file = File::open(&file.content_path)?;
+                    let mut reader = BufReader::new(content_file);
+                    std::io::copy(&mut reader, &mut self.writer)?;
+
+                    self.entries.push(file.entry);
+
+                    next_id_to_write += 1;
+                }
+            }
+
+            Ok(())
+        })?;
+
+        Ok(())
     }
 }

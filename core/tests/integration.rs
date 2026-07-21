@@ -26,7 +26,7 @@ fn test_pack_and_extract_single_file() -> sulfur::Result<()> {
     let file = File::open(&archive_path)?;
     let reader = BufReader::new(file);
     let mut archive = ArchiveReader::open(reader)?;
-    archive.extract_all(&extraction_dir)?;
+    archive.extract_all(&archive_path, &extraction_dir)?;
 
     let extracted_file = extraction_dir.join("test.txt");
     assert!(extracted_file.exists());
@@ -53,11 +53,9 @@ fn test_pack_and_extract_empty_directory() -> sulfur::Result<()> {
     let file = File::open(&archive_path)?;
     let reader = BufReader::new(file);
     let mut archive = ArchiveReader::open(reader)?;
-    archive.extract_all(&extraction_dir)?;
+    archive.extract_all(&archive_path, &extraction_dir)?;
 
-    if extraction_dir.exists() {
-        assert!(extraction_dir.iter().next().is_none());
-    }
+    assert!(!extraction_dir.exists());
 
     Ok(())
 }
@@ -82,7 +80,7 @@ fn test_pack_and_extract_empty_file() -> sulfur::Result<()> {
     let file = File::open(&archive_path)?;
     let reader = BufReader::new(file);
     let mut archive = ArchiveReader::open(reader)?;
-    archive.extract_all(&extraction_dir)?;
+    archive.extract_all(&archive_path, &extraction_dir)?;
 
     let extracted_file = extraction_dir.join("test.txt");
     assert!(extracted_file.exists());
@@ -113,7 +111,7 @@ fn test_pack_and_extract_multiple_files() -> sulfur::Result<()> {
     let file = File::open(&archive_path)?;
     let reader = BufReader::new(file);
     let mut archive = ArchiveReader::open(reader)?;
-    archive.extract_all(&extraction_dir)?;
+    archive.extract_all(&archive_path, &extraction_dir)?;
 
     for n in 0..10 {
         let extracted_file = extraction_dir.join(format!("test{n}.txt"));
@@ -144,7 +142,7 @@ fn test_pack_and_extract_unicode_filename() -> sulfur::Result<()> {
     let file = File::open(&archive_path)?;
     let reader = BufReader::new(file);
     let mut archive = ArchiveReader::open(reader)?;
-    archive.extract_all(&extraction_dir)?;
+    archive.extract_all(&archive_path, &extraction_dir)?;
 
     let extracted_file = extraction_dir.join("😀.txt");
     assert!(extracted_file.exists());
