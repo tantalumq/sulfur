@@ -33,11 +33,11 @@ const ENTRY_SIZE: usize = 28;
 // const NAME_LEN_SIZE: u64 = 4;
 // const SOURCE_SIZE_SIZE: u64 = 8;
 
-const BUFFER_SIZE: usize = 128 * 1024;
-
 const MAX_FILENAME_SIZE: u32 = 4096;
 const MAX_FILE_COUNT: u32 = 1_000_000;
 const MAX_FILE_SOURCE_SIZE: u64 = 128 * 1024 * 1024 * 1024;
 const MAX_FILE_COMPRESSED_SIZE: u64 = 128 * 1024 * 1024 * 1024;
 
-const COMPRESSION_LEVEL: i32 = 4;
+const BUFFER_SIZE: usize = 512 * 1024;
+
+const COMPRESSION_LEVEL: i32 = 3;

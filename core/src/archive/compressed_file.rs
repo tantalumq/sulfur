@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, Read, Write},
+    io::{Read, Write},
     path::Path,
 };
 
@@ -19,17 +19,20 @@ impl CompressedFile {
         let mtime_source = metadata.modified()?;
         let file_size = metadata.len();
 
+        let buffer_size = usize::try_from(file_size)?.clamp(BUFFER_SIZE / 8, BUFFER_SIZE);
+
         let temp = NamedTempFile::new()?;
         let mut hasher_writer = HasherWriter::new(&temp);
 
         let file = File::open(path)?;
         let lock = RwLock::new(file);
         let readable = lock.read()?;
-        let mut reader = BufReader::with_capacity(BUFFER_SIZE, &*readable);
+
+        let mut reader = &*readable;
 
         let mut source_checksum = Hasher::new();
 
-        let mut buffer = vec![0u8; BUFFER_SIZE];
+        let mut buffer = vec![0u8; buffer_size];
 
         let mut encoder = zstd::Encoder::new(hasher_writer, COMPRESSION_LEVEL)?;
 
