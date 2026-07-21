@@ -8,7 +8,7 @@ use std::{
     thread,
 };
 
-use flate2::{Crc, write::GzDecoder};
+use crc32fast::Hasher;
 use tempfile::NamedTempFile;
 
 use crate::{
@@ -167,9 +167,9 @@ impl<D> ArchiveReader<D> {
     ) -> Result<DecompressStats> {
         let mut hasher_writer = HasherWriter::new(&mut writer);
 
-        let mut compressed_checksum = Crc::new();
+        let mut compressed_checksum = Hasher::new();
 
-        let mut decoder = GzDecoder::new(&mut hasher_writer);
+        let mut decoder = zstd::stream::write::Decoder::new(&mut hasher_writer)?;
 
         let mut remaining_bytes = entry.compressed_size;
 
@@ -227,10 +227,12 @@ impl<D> ArchiveReader<D> {
             });
         }
 
-        decoder.finish()?;
+        decoder.flush()?;
+
+        drop(decoder);
 
         let source_checksum = hasher_writer.sum();
-        let compressed_checksum = compressed_checksum.sum();
+        let compressed_checksum = compressed_checksum.finalize();
         let source_size = hasher_writer.take_and_reset_bytes();
 
         writer.flush()?;

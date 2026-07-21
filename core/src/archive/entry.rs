@@ -1,7 +1,10 @@
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
+
+use crc32fast::Hasher;
 
 use crate::{
     ENTRY_SIZE, Error, MAX_FILE_COMPRESSED_SIZE, MAX_FILE_SOURCE_SIZE, MAX_FILENAME_SIZE, Result,
+    archive::entry_reader::EntryReader,
 };
 
 #[derive(Clone)]
@@ -101,22 +104,21 @@ impl Entry {
         Ok(())
     }
 
-    // pub fn update<W: Write + Seek>(&self, mut writer: W) -> Result<()> {
-    //     let name_len: u64 = self.name.len().try_into()?;
-    //     let empty_fields_offset = self.offset + NAME_LEN_SIZE + name_len + SOURCE_SIZE_SIZE;
+    pub fn into_reader<R: Read + Seek>(&self, mut reader: R) -> Result<EntryReader<R>> {
+        reader.seek(SeekFrom::Start(self.data_start))?;
 
-    //     writer.seek(SeekFrom::Start(empty_fields_offset))?;
+        let take_reader = reader.take(self.compressed_size);
 
-    //     let mut buffer = [0u8; 16];
-    //     buffer[0..4].copy_from_slice(&self.source_checksum.to_be_bytes());
-    //     buffer[4..12].copy_from_slice(&self.compressed_size.to_be_bytes());
-    //     buffer[12..16].copy_from_slice(&self.compressed_checksum.to_be_bytes());
-    //     writer.write_all(&buffer)?;
+        let zstd_decoder = zstd::Decoder::new(take_reader)?;
 
-    //     writer.seek(SeekFrom::End(0))?;
-
-    //     Ok(())
-    // }
+        Ok(EntryReader {
+            decoder: zstd_decoder,
+            hasher: Hasher::new(),
+            expected_checksum: self.source_checksum,
+            expected_size: self.source_size,
+            bytes_read: 0,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@ pub mod archive;
 mod error;
 mod utils;
 
-pub use archive::{ArchiveReader, ArchiveWriter};
+pub use archive::{ArchiveReader, ArchiveWriter, Entry};
 pub use error::{Error, Result};
 pub use utils::{archive_path, extraction_path};
 
@@ -37,5 +37,7 @@ const BUFFER_SIZE: usize = 128 * 1024;
 
 const MAX_FILENAME_SIZE: u32 = 4096;
 const MAX_FILE_COUNT: u32 = 1_000_000;
-const MAX_FILE_SOURCE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
-const MAX_FILE_COMPRESSED_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_FILE_SOURCE_SIZE: u64 = 128 * 1024 * 1024 * 1024;
+const MAX_FILE_COMPRESSED_SIZE: u64 = 128 * 1024 * 1024 * 1024;
+
+const COMPRESSION_LEVEL: i32 = 4;

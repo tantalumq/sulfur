@@ -4,12 +4,12 @@ use std::{
     path::Path,
 };
 
+use crc32fast::Hasher;
 use fd_lock::RwLock;
-use flate2::{Compression, Crc, write::GzEncoder};
 use tempfile::NamedTempFile;
 
 use crate::{
-    BUFFER_SIZE, Error, Result,
+    BUFFER_SIZE, COMPRESSION_LEVEL, Error, Result,
     archive::{CompressedFile, HasherWriter, entry::Entry},
 };
 impl CompressedFile {
@@ -27,11 +27,11 @@ impl CompressedFile {
         let readable = lock.read()?;
         let mut reader = BufReader::with_capacity(BUFFER_SIZE, &*readable);
 
-        let mut source_checksum = Crc::new();
+        let mut source_checksum = Hasher::new();
 
         let mut buffer = vec![0u8; BUFFER_SIZE];
 
-        let mut encoder = GzEncoder::new(hasher_writer, Compression::default());
+        let mut encoder = zstd::Encoder::new(hasher_writer, COMPRESSION_LEVEL)?;
 
         loop {
             let bytes = reader.read(&mut buffer)?;
@@ -59,7 +59,7 @@ impl CompressedFile {
             name: relative_name,
             source_size: file_size,
             compressed_size: hasher_writer.take_and_reset_bytes(),
-            source_checksum: source_checksum.sum(),
+            source_checksum: source_checksum.finalize(),
             compressed_checksum: hasher_writer.sum(),
             offset: 0,
             data_start: 0,

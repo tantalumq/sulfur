@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use flate2::Crc;
+use crc32fast::Hasher;
 
 use crate::archive::HasherWriter;
 
@@ -9,13 +9,13 @@ impl<W: Write> HasherWriter<W> {
     pub fn new(writer: W) -> Self {
         Self {
             writer,
-            hasher: Crc::new(),
+            hasher: Hasher::new(),
             bytes: 0,
         }
     }
 
     pub fn sum(&self) -> u32 {
-        self.hasher.sum()
+        self.hasher.clone().finalize()
     }
 
     pub fn take_and_reset_bytes(&mut self) -> u64 {

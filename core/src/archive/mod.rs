@@ -1,7 +1,7 @@
-use flate2::Crc;
+use crc32fast::Hasher;
 use tempfile::TempPath;
 
-use crate::archive::{entry::Entry, header::Header};
+pub use crate::archive::{entry::Entry, header::Header};
 
 pub mod entry;
 pub mod header;
@@ -9,6 +9,7 @@ pub mod reader;
 pub mod writer;
 
 pub(crate) mod compressed_file;
+pub(crate) mod entry_reader;
 pub(crate) mod hasher_writer;
 
 pub struct CompressedFile {
@@ -31,6 +32,6 @@ pub struct ArchiveReader<R> {
 
 struct HasherWriter<W> {
     writer: W,
-    hasher: Crc,
+    hasher: Hasher,
     bytes: u64,
 }
