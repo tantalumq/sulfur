@@ -1,11 +1,13 @@
 [package]
 name = "sulfur-archive"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Small and fast file archiver"
 license = "MIT OR Apache-2.0"
 readme = "../README.md"
 repository = "https://github.com/tantalumq/sulfur"
+keywords = ["archive", "compression", "zstd", "streaming", "binary"]
+categories = ["compression", "filesystem"]
 
 [dependencies]
 thiserror = "2.0.18"
