@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    fs::{File, create_dir_all},
+    fs::{self, File, create_dir_all},
     io::{Read, Seek, SeekFrom, Write},
     num::NonZero,
     path::Path,
@@ -53,6 +53,13 @@ impl<R: Read + Seek> ArchiveReader<R> {
     pub fn extract_all(&mut self, source: &Path, target: &Path) -> Result<()> {
         if self.entries().is_empty() {
             return Ok(());
+        }
+
+        if target.is_dir() && fs::read_dir(target)?.next().is_some() {
+            return Err(Error::Path(format!(
+                "target directory isn't empty: {}",
+                target.display()
+            )));
         }
 
         let threads_num = std::thread::available_parallelism().map_or(4, NonZero::get);

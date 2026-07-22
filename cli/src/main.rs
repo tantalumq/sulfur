@@ -6,7 +6,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
-use sulfur::{ArchiveReader, ArchiveWriter, Error};
+use sulfur_archive::{ArchiveReader, ArchiveWriter, Error};
 
 fn main() {
     let cli = Cli::parse();
@@ -18,10 +18,10 @@ fn main() {
     }
 }
 
-fn run(cli: Cli) -> sulfur::Result<()> {
+fn run(cli: Cli) -> sulfur_archive::Result<()> {
     match cli.command {
         Command::Pack { source, output } => {
-            let target = sulfur::archive_path(&source, &output)?;
+            let target = sulfur_archive::archive_path(&source, &output)?;
 
             if let Some(parents) = target.parent() {
                 std::fs::create_dir_all(parents)?;
@@ -34,7 +34,7 @@ fn run(cli: Cli) -> sulfur::Result<()> {
             Ok(())
         }
         Command::Unpack { source, output } => {
-            let target = sulfur::extraction_path(&source, &output)?;
+            let target = sulfur_archive::extraction_path(&source, &output)?;
 
             let file = File::open(&source)?;
             let reader = BufReader::new(file);
@@ -46,7 +46,7 @@ fn run(cli: Cli) -> sulfur::Result<()> {
             source,
             output,
         } => {
-            let target = sulfur::extraction_path(&source, &output)?;
+            let target = sulfur_archive::extraction_path(&source, &output)?;
 
             let file = File::open(source)?;
             let reader = BufReader::new(file);

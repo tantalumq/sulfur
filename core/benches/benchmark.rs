@@ -5,7 +5,7 @@ use std::{
 };
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use sulfur::{ArchiveReader, ArchiveWriter};
+use sulfur_archive::{ArchiveReader, ArchiveWriter};
 use tempfile::tempdir;
 
 #[allow(clippy::missing_panics_doc)]

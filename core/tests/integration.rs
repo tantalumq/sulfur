@@ -3,11 +3,11 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-use sulfur::{ArchiveReader, ArchiveWriter, Error, archive::entry::Entry};
+use sulfur_archive::{ArchiveReader, ArchiveWriter, Error, archive::entry::Entry};
 use tempfile::tempdir;
 
 #[test]
-fn test_pack_and_extract_single_file() -> sulfur::Result<()> {
+fn test_pack_and_extract_single_file() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -36,7 +36,7 @@ fn test_pack_and_extract_single_file() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_pack_and_extract_empty_directory() -> sulfur::Result<()> {
+fn test_pack_and_extract_empty_directory() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -61,7 +61,7 @@ fn test_pack_and_extract_empty_directory() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_pack_and_extract_empty_file() -> sulfur::Result<()> {
+fn test_pack_and_extract_empty_file() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -90,7 +90,7 @@ fn test_pack_and_extract_empty_file() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_pack_and_extract_multiple_files() -> sulfur::Result<()> {
+fn test_pack_and_extract_multiple_files() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -123,7 +123,7 @@ fn test_pack_and_extract_multiple_files() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_pack_and_extract_unicode_filename() -> sulfur::Result<()> {
+fn test_pack_and_extract_unicode_filename() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -152,7 +152,7 @@ fn test_pack_and_extract_unicode_filename() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_extract_single_file_by_index() -> sulfur::Result<()> {
+fn test_extract_single_file_by_index() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -183,7 +183,7 @@ fn test_extract_single_file_by_index() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_extract_invalid_index() -> sulfur::Result<()> {
+fn test_extract_invalid_index() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -210,7 +210,7 @@ fn test_extract_invalid_index() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_archive_info_after_pack() -> sulfur::Result<()> {
+fn test_archive_info_after_pack() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let source_dir = dir.path().join("source");
@@ -236,7 +236,7 @@ fn test_archive_info_after_pack() -> sulfur::Result<()> {
 }
 
 #[test]
-fn test_extract_rejects_path_traversal() -> sulfur::Result<()> {
+fn test_extract_rejects_path_traversal() -> sulfur_archive::Result<()> {
     let dir = tempdir()?;
 
     let extraction_dir = dir.path().join("extraction");
