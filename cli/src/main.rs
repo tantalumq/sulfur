@@ -7,7 +7,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
-use sulfur_archive::{ArchiveReader, ArchiveWriter, Error};
+use sulfur_archive::{ArchiveReader, ArchiveWriter, Error, to_readable_bytes};
 
 fn main() {
     let cli = Cli::parse();
@@ -37,8 +37,29 @@ fn run(cli: Cli) -> sulfur_archive::Result<()> {
             let file = File::create(target)?;
             let writer = BufWriter::new(file);
             let archive = ArchiveWriter::new(writer)?.with_compression_level(compression);
-            archive.pack(&source)?;
-            println!("Successfully packed in {:.2?}", start.elapsed());
+            let (_, stats) = archive.pack(&source)?;
+
+            let ratio = if stats.source_size != 0 {
+                format!(
+                    "{}%",
+                    100u64.saturating_sub(
+                        (stats.compressed_size * 100)
+                            .checked_div(stats.source_size)
+                            .expect("Can't divide by source size")
+                    )
+                )
+            } else {
+                "N/A".to_string()
+            };
+
+            println!("Successfully packed {} files", stats.file_count);
+            println!("Source size:      {}", to_readable_bytes(stats.source_size));
+            println!(
+                "Compressed size:  {}",
+                to_readable_bytes(stats.compressed_size)
+            );
+            println!("Saved:            {ratio}");
+            println!("Time:             {:.2?}", start.elapsed());
             Ok(())
         }
         Command::Unpack { source, output } => {

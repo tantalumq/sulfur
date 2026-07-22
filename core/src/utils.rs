@@ -179,7 +179,8 @@ pub fn collect_files(source: &Path) -> Result<Vec<(PathBuf, String)>> {
     Ok(file_paths)
 }
 
-pub(crate) fn to_readable_bytes(bytes: u64) -> String {
+#[must_use]
+pub fn to_readable_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;

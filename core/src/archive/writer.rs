@@ -36,7 +36,7 @@ impl<W: Write + Seek> ArchiveWriter<W> {
         self
     }
 
-    pub fn pack(mut self, source: &Path) -> Result<W> {
+    pub fn pack(mut self, source: &Path) -> Result<(W, PackStats)> {
         let mut file_paths = collect_files(source)?;
         file_paths.sort();
 
@@ -48,7 +48,13 @@ impl<W: Write + Seek> ArchiveWriter<W> {
             self.header.write(&mut self.writer)?;
             self.writer.flush()?;
 
-            return Ok(self.writer);
+            let pack_stats = PackStats {
+                source_size: 0,
+                compressed_size: 0,
+                file_count: 0,
+            };
+
+            return Ok((self.writer, pack_stats));
         }
 
         self.write_files(file_paths)?;
@@ -68,7 +74,13 @@ impl<W: Write + Seek> ArchiveWriter<W> {
 
         self.writer.flush()?;
 
-        Ok(self.writer)
+        let pack_stats = PackStats {
+            source_size: self.entries.iter().map(|e| e.source_size).sum(),
+            compressed_size: self.entries.iter().map(|e| e.compressed_size).sum(),
+            file_count: self.header.file_count,
+        };
+
+        Ok((self.writer, pack_stats))
     }
 
     fn write_files(&mut self, file_paths: Vec<(PathBuf, String)>) -> Result<()> {
@@ -135,4 +147,10 @@ impl<W: Write + Seek> ArchiveWriter<W> {
 
         Ok(())
     }
+}
+
+pub struct PackStats {
+    pub source_size: u64,
+    pub compressed_size: u64,
+    pub file_count: u32,
 }

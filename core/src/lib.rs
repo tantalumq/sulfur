@@ -24,7 +24,7 @@ mod utils;
 
 pub use archive::{ArchiveReader, ArchiveWriter, Entry};
 pub use error::{Error, Result};
-pub use utils::{archive_path, extraction_path};
+pub use utils::{archive_path, extraction_path, to_readable_bytes};
 
 const SIGNATURE: &[u8] = b".slf";
 const VERSION: [u8; 2] = [1, 0]; // 1.0

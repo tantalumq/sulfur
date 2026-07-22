@@ -51,7 +51,7 @@ use std::io::{BufReader, BufWriter};
 // Pack
 let file = File::create("archive.slf")?;
 let archive = ArchiveWriter::new(BufWriter::new(file))?;
-archive.pack("source/")?;
+let (writer, stats) = archive.pack("source/")?;
 
 // Unpack
 let file = File::open("archive.slf")?;
