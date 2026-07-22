@@ -9,12 +9,17 @@ use fd_lock::RwLock;
 use tempfile::NamedTempFile;
 
 use crate::{
-    BUFFER_SIZE, COMPRESSION_LEVEL, Error, Result,
+    BUFFER_SIZE, Error, Result,
     archive::{CompressedFile, HasherWriter, entry::Entry},
 };
 impl CompressedFile {
     #[allow(clippy::missing_errors_doc)]
-    pub fn create(id: u32, path: &Path, relative_name: String) -> Result<Self> {
+    pub fn create(
+        id: u32,
+        path: &Path,
+        relative_name: String,
+        compression_level: i32,
+    ) -> Result<Self> {
         let metadata = path.metadata()?;
         let mtime_source = metadata.modified()?;
         let file_size = metadata.len();
@@ -34,7 +39,7 @@ impl CompressedFile {
 
         let mut buffer = vec![0u8; buffer_size];
 
-        let mut encoder = zstd::Encoder::new(hasher_writer, COMPRESSION_LEVEL)?;
+        let mut encoder = zstd::Encoder::new(hasher_writer, compression_level)?;
 
         loop {
             let bytes = reader.read(&mut buffer)?;

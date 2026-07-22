@@ -22,6 +22,7 @@ pub struct ArchiveWriter<W> {
     writer: W,
     header: Header,
     entries: Vec<Entry>,
+    compression_level: i32,
 }
 
 pub struct ArchiveReader<R> {

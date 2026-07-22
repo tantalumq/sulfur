@@ -27,7 +27,13 @@ impl<W: Write + Seek> ArchiveWriter<W> {
             writer,
             header,
             entries: Vec::new(),
+            compression_level: 3,
         })
+    }
+    #[must_use]
+    pub fn with_compression_level(mut self, level: i32) -> Self {
+        self.compression_level = level;
+        self
     }
 
     pub fn pack(mut self, source: &Path) -> Result<W> {
@@ -71,6 +77,8 @@ impl<W: Write + Seek> ArchiveWriter<W> {
 
         let threads_num = std::thread::available_parallelism().map_or(4, NonZero::get);
 
+        let compression_level = self.compression_level;
+
         let (tx, rx) = mpsc::sync_channel::<Result<CompressedFile>>(threads_num);
 
         let mut pending = BTreeMap::new();
@@ -88,7 +96,12 @@ impl<W: Write + Seek> ArchiveWriter<W> {
                 s.spawn(move || -> Result<()> {
                     for ((path, name), id) in chunk {
                         if tx
-                            .send(CompressedFile::create(*id, path, name.clone()))
+                            .send(CompressedFile::create(
+                                *id,
+                                path,
+                                name.clone(),
+                                compression_level,
+                            ))
                             .is_err()
                         {
                             break;

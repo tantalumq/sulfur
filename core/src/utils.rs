@@ -179,6 +179,29 @@ pub fn collect_files(source: &Path) -> Result<Vec<(PathBuf, String)>> {
     Ok(file_paths)
 }
 
+pub(crate) fn to_readable_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    const TB: u64 = GB * 1024;
+
+    if bytes > TB {
+        let hundredths = (bytes * 100 + (TB / 2)) / TB;
+        format!("{}.{:02} TB", hundredths / 100, hundredths % 100)
+    } else if bytes > GB {
+        let hundredths = (bytes * 100 + (GB / 2)) / GB;
+        format!("{}.{:02} GB", hundredths / 100, hundredths % 100)
+    } else if bytes > MB {
+        let hundredths = (bytes * 100 + (MB / 2)) / MB;
+        format!("{}.{:02} MB", hundredths / 100, hundredths % 100)
+    } else if bytes > KB {
+        let hundredths = (bytes * 100 + (KB / 2)) / KB;
+        format!("{}.{:02} KB", hundredths / 100, hundredths % 100)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

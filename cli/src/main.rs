@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::{BufReader, BufWriter},
     path::PathBuf,
+    time::Instant,
 };
 
 use clap::{Parser, Subcommand};
@@ -19,8 +20,14 @@ fn main() {
 }
 
 fn run(cli: Cli) -> sulfur_archive::Result<()> {
+    let start = Instant::now();
+
     match cli.command {
-        Command::Pack { source, output } => {
+        Command::Pack {
+            source,
+            output,
+            compression,
+        } => {
             let target = sulfur_archive::archive_path(&source, &output)?;
 
             if let Some(parents) = target.parent() {
@@ -29,8 +36,9 @@ fn run(cli: Cli) -> sulfur_archive::Result<()> {
 
             let file = File::create(target)?;
             let writer = BufWriter::new(file);
-            let archive = ArchiveWriter::new(writer)?;
+            let archive = ArchiveWriter::new(writer)?.with_compression_level(compression);
             archive.pack(&source)?;
+            println!("Successfully packed in {:.2?}", start.elapsed());
             Ok(())
         }
         Command::Unpack { source, output } => {
@@ -39,7 +47,9 @@ fn run(cli: Cli) -> sulfur_archive::Result<()> {
             let file = File::open(&source)?;
             let reader = BufReader::new(file);
             let mut archive = ArchiveReader::open(reader)?;
-            archive.extract_all(&source, &target)
+            archive.extract_all(&source, &target)?;
+            println!("Successfully extracted in {:.2?}", start.elapsed());
+            Ok(())
         }
         Command::Get {
             name,
@@ -57,10 +67,12 @@ fn run(cli: Cli) -> sulfur_archive::Result<()> {
                 .get(name.as_str())
                 .copied()
                 .ok_or(Error::IncorrectFileName(format!(
-                    "can't found {name} in archive"
+                    "can't find {name} in archive"
                 )))?;
 
-            archive.extract(index, &target)
+            archive.extract(index, &target)?;
+            println!("Successfully got file in {:.2?}", start.elapsed());
+            Ok(())
         }
         Command::Info { source } => {
             let file = File::open(source)?;
@@ -85,6 +97,8 @@ enum Command {
         source: PathBuf,
         #[arg(short, long, default_value = "./")]
         output: PathBuf,
+        #[arg(short, long, default_value = "3")]
+        compression: i32,
     },
 
     Unpack {

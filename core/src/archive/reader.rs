@@ -14,7 +14,7 @@ use tempfile::NamedTempFile;
 use crate::{
     ArchiveReader, BUFFER_SIZE, Error, MAX_FILE_SOURCE_SIZE, Result,
     archive::{HasherWriter, entry::Entry, header::Header},
-    utils::safe_join,
+    utils::{safe_join, to_readable_bytes},
 };
 
 #[allow(clippy::missing_errors_doc)]
@@ -283,14 +283,14 @@ impl<D> Display for ArchiveReader<D> {
         let original_size_width = self
             .entries
             .iter()
-            .map(|f| f.source_size.to_string().len())
+            .map(|f| to_readable_bytes(f.source_size).len())
             .max()
             .unwrap_or(0)
             .max("ORIGINAL SIZE".len());
         let compressed_size_width = self
             .entries
             .iter()
-            .map(|f| f.compressed_size.to_string().len())
+            .map(|f| to_readable_bytes(f.compressed_size).len())
             .max()
             .unwrap_or(0)
             .max("COMPRESSED SIZE".len());
@@ -347,8 +347,8 @@ impl<D> Display for ArchiveReader<D> {
                 "{:^index_width$} | {:<name_width$} | {:<original_size_width$} | {:<compressed_size_width$} | {:<original_checksum_width$} | {:<compressed_checksum_width$} | {:<6}",
                 index,
                 entry.name,
-                entry.source_size,
-                entry.compressed_size,
+                to_readable_bytes(entry.source_size),
+                to_readable_bytes(entry.compressed_size),
                 entry.source_checksum,
                 entry.compressed_checksum,
                 ratio
