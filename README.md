@@ -44,10 +44,6 @@ slf info archive.slf
 
 ### Pack and unpack
 ```rust
-use sulfur_archive::{ArchiveWriter, ArchiveReader};
-use std::fs::File;
-use std::io::{BufReader, BufWriter};
-
 // Pack
 let file = File::create("archive.slf")?;
 let archive = ArchiveWriter::new(BufWriter::new(file))?;
@@ -79,10 +75,9 @@ println!("{archive}")
 use std::io::Read;
 
 let file = File::open("archive.slf")?;
-let archive = ArchiveReader::open(BufReader::new(file))?;
+let mut archive = ArchiveReader::open(BufReader::new(file))?;
 
-let entry = &archive.entries()[0];
-let mut reader = entry.into_reader(file)?;
+let mut reader = archive.get_entry_reader(0)?;
 
 let mut content = Vec::new();
 reader.read_to_end(&mut content)?;

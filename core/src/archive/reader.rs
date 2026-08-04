@@ -13,7 +13,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
     ArchiveReader, BUFFER_SIZE, Error, MAX_FILE_SOURCE_SIZE, Result,
-    archive::{HasherWriter, entry::Entry, header::Header},
+    archive::{HasherWriter, entry::Entry, entry_reader::EntryReader, header::Header},
     utils::{safe_join, to_readable_bytes},
 };
 
@@ -99,6 +99,11 @@ impl<R: Read + Seek> ArchiveReader<R> {
                 index,
                 file_count: self.entries.len().try_into()?,
             })
+    }
+
+    pub fn get_entry_reader(&mut self, index: usize) -> Result<EntryReader<&mut R>> {
+        let entry = &self.entries[index];
+        entry.into_reader(&mut self.reader)
     }
 
     pub fn get_entries_map(&self) -> Result<HashMap<&str, u32>> {
