@@ -1,6 +1,6 @@
 [package]
 name = "sulfur-archive"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Small and fast file archiver"
 license = "MIT OR Apache-2.0"
