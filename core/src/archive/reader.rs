@@ -101,8 +101,8 @@ impl<R: Read + Seek> ArchiveReader<R> {
             })
     }
 
-    pub fn get_entry_reader(&mut self, index: usize) -> Result<EntryReader<&mut R>> {
-        let entry = &self.entries[index];
+    pub fn get_entry_reader(&mut self, index: u32) -> Result<EntryReader<&mut R>> {
+        let entry = self.get_entry(index)?.clone();
         entry.into_reader(&mut self.reader)
     }
 
